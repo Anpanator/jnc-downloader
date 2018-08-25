@@ -5,7 +5,7 @@ A bash script to download ebooks from your j-novel.club library.
 The script requires `jq` and `curl` > 7.22
 
 ## Limitations
-This script was written and tested on a Linux distribution. It may or not work on MacOS or the Windows Subsystem for Linux, feel free to try!
+This script was written and tested on a Linux distribution. It may or may not work on MacOS or the Windows Subsystem for Linux, feel free to try!
 
 It will also only work if you have an account directly with J-Novel.club. If you log in using Google/Facebook, this script will not work.
 
