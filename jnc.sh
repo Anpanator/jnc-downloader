@@ -54,7 +54,7 @@ while read line;
     then
       set +e
       echo "$bookTitle 	 $bookId 	 $bookTime"
-      downloadLink="https://api.j-novel.club/api/volumes/${bookId}/getpremiumebook?userId=${userId}&userName=${userName}&access_token=$authorizationToken"
+      downloadLink="https://api.j-novel.club/api/volumes/${bookId}/getpremiumebook?userId=${userId}&userName=$(echo $userName | sed 's/ /%20/g')&access_token=$authorizationToken"
       statuscode=$(curl --remote-name --remote-header-name --fail --globoff --silent --write-out "%{http_code}" "$downloadLink")
       if [ "$statuscode" -eq "200" ]
         then
