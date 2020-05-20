@@ -2,7 +2,7 @@
 A bash script to download ebooks from your j-novel.club library.
 
 ## Dependencies
-The script requires `jq` and `curl` > 7.22
+The script requires `jq` and `curl` > 7.22 as well as `sed`
 
 ## Limitations
 This script was written and tested on a Linux distribution. It may or may not work on MacOS or the Windows Subsystem for Linux, feel free to try!
