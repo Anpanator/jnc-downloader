@@ -61,6 +61,8 @@ while read line;
         echo $bookId >> "$downloadedBooksList"
         else
         echo "Returned HTTP $statuscode. Book was not saved!"
+        # Clean up failed download file
+        rm getpremiumebook?*
       fi
       set -e
     fi
