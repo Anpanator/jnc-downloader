@@ -3,6 +3,7 @@ from datetime import datetime
 import json
 import os
 import requests
+import sys
 
 # Config: START
 
@@ -25,7 +26,9 @@ r = requests.post(
 
 loginResponse = r.json()
 
-assert('error' not in loginResponse)
+if 'error' in loginResponse:
+    print('Login failed!')
+    sys.exit()
 
 authorizationToken = loginResponse['id']
 userId = loginResponse['user']['id']
@@ -56,7 +59,7 @@ for book in ownedBooksList:
     fileName = book['titleslug'] + '.epub'
     filePath = os.path.join(downloadTargetDirectory, fileName)
 
-    print('%s %s %s' % (bookTitle, bookId, bookTime))
+    print('%s\t%s\t%s' % (bookTitle, bookId, bookTime))
 
     r = requests.get(
         'https://api.j-novel.club/api/volumes/%s/getpremiumebook' % bookId,
@@ -67,7 +70,7 @@ for book in ownedBooksList:
         }, allow_redirects=False)
 
     if r.status_code != 200:
-        print(r.status_code, r.text)
+        print(r.status_code, ': Book not available.')
         continue
 
     downloadedBooksList.append(bookId)
@@ -77,3 +80,8 @@ for book in ownedBooksList:
 
     with open(downloadedBooksListFile, 'a') as f:
         f.write(bookId + '\n')
+
+requests.post('https://api.j-novel.club/api/users/logout',
+    headers={'Authorization': authorizationToken})
+
+print('Finished downloading and logged out')
