@@ -59,7 +59,7 @@ for book in ownedBooksList:
     fileName = book['titleslug'] + '.epub'
     filePath = os.path.join(downloadTargetDirectory, fileName)
 
-    print('%s\t%s\t%s' % (bookTitle, bookId, bookTime))
+    print('%s \t%s \t%s' % (bookTitle, bookId, bookTime))
 
     r = requests.get(
         'https://api.j-novel.club/api/volumes/%s/getpremiumebook' % bookId,
