@@ -1,87 +1,95 @@
 from __future__ import print_function
-from datetime import datetime
-import json
+
 import os
-import requests
 import sys
+from datetime import datetime
+
+import requests
 
 # Config: START
 
-downloadTargetDirectory = '~/Downloads/'
-downloadedBooksListFile = '~/.downloadedJncBooks'
+download_target_dir = '~/Downloads/'
+downloaded_books_list_file = '~/.downloadedJncBooks'
 
-loginEmail = 'user@server.tld'
-loginPassword = 'somepassword'
+login_email = 'user@server.tld'
+login_pw = 'somepassword'
 
 # Config: END
 
-downloadTargetDirectory = os.path.expanduser(downloadTargetDirectory)
-downloadedBooksListFile = os.path.expanduser(downloadedBooksListFile)
-curTime = datetime.now().isoformat()[:23] + 'Z'
+download_target_dir = os.path.expanduser(download_target_dir)
+downloaded_books_list_file = os.path.expanduser(downloaded_books_list_file)
+cur_time = datetime.now().isoformat()[:23] + 'Z'
 
 r = requests.post(
     'https://api.j-novel.club/api/users/login?include=user',
     headers={'Accept': 'application/json', 'content-type': 'application/json'},
-    json={'email': loginEmail, 'password': loginPassword})
+    json={'email': login_email, 'password': login_pw}
+)
 
-loginResponse = r.json()
+login_response = r.json()
 
-if 'error' in loginResponse:
+if 'error' in login_response:
     print('Login failed!')
     sys.exit()
 
-authorizationToken = loginResponse['id']
-userId = loginResponse['user']['id']
-userName = loginResponse['user']['username']
+auth_token = login_response['id']
+user_id = login_response['user']['id']
+user_name = login_response['user']['username']
 
 r = requests.get(
-    'https://api.j-novel.club/api/users/%s/' % userId,
+    'https://api.j-novel.club/api/users/%s/' % user_id,
     params={'filter': '{"include":[{"ownedBooks":"serie"}]}'},
-    headers={'Authorization': authorizationToken})
+    headers={'Authorization': auth_token}
+)
 
-rawAccountDetails = r.json()
+raw_account_details = r.json()
 
-ownedBooksList = rawAccountDetails['ownedBooks']
-downloadedBooksList = []
+owned_books = raw_account_details['ownedBooks']
+downloaded_books = []
+new_books = []
 
-if os.path.exists(downloadedBooksListFile):
-	with open(downloadedBooksListFile, 'r') as f:
-		downloadedBooksList = [line.strip() for line in f.readlines()]
+if os.path.exists(downloaded_books_list_file):
+    with open(downloaded_books_list_file, 'r') as f:
+        downloaded_books = [line.strip() for line in f.readlines()]
 
-for book in ownedBooksList:
-    bookId = book['id']
-    bookTime = book['publishingDate']
-    bookTitle = book['title']
+for book in owned_books:
+    book_id = book['id']
+    book_time = book['publishingDate']
+    book_title = book['title']
 
-    if bookTime > curTime or bookId in downloadedBooksList:
+    if book_time > cur_time or book_id in downloaded_books:
         continue
 
-    fileName = book['titleslug'] + '.epub'
-    filePath = os.path.join(downloadTargetDirectory, fileName)
+    book_file_name = book['titleslug'] + '.epub'
+    book_file_path = os.path.join(download_target_dir, book_file_name)
 
-    print('%s \t%s \t%s' % (bookTitle, bookId, bookTime))
+    print('%s \t%s \t%s' % (book_title, book_id, book_time))
 
     r = requests.get(
-        'https://api.j-novel.club/api/volumes/%s/getpremiumebook' % bookId,
+        'https://api.j-novel.club/api/volumes/%s/getpremiumebook' % book_id,
         params={
-            'userId': userId,
-            'userName': userName,
-            'access_token': authorizationToken
-        }, allow_redirects=False)
+            'userId': user_id,
+            'userName': user_name,
+            'access_token': auth_token
+        }, allow_redirects=False
+    )
 
     if r.status_code != 200:
         print(r.status_code, ': Book not available.')
         continue
 
-    downloadedBooksList.append(bookId)
+    new_books.append(book_id)
 
-    with open(filePath, 'wb') as f:
+    with open(book_file_path, 'wb') as f:
         f.write(r.content)
 
-    with open(downloadedBooksListFile, 'a') as f:
-        f.write(bookId + '\n')
+with open(downloaded_books_list_file, 'a') as f:
+    for book_id in new_books:
+        f.write(book_id + '\n')
 
-requests.post('https://api.j-novel.club/api/users/logout',
-    headers={'Authorization': authorizationToken})
+requests.post(
+    'https://api.j-novel.club/api/users/logout',
+    headers={'Authorization': auth_token}
+)
 
 print('Finished downloading and logged out')
