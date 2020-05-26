@@ -1,5 +1,6 @@
 from __future__ import print_function
 
+import csv
 import os
 import sys
 from datetime import datetime
@@ -45,25 +46,35 @@ r = requests.get(
 raw_account_details = r.json()
 
 owned_books = raw_account_details['ownedBooks']
-downloaded_books = []
-new_books = []
+
+owned_books = sorted(
+    owned_books,
+    key=lambda book: (book['serie']['titleslug'], book['volumeNumber']))
+
+downloaded_book_ids = []
 
 if os.path.exists(downloaded_books_list_file):
     with open(downloaded_books_list_file, 'r') as f:
-        downloaded_books = [line.strip() for line in f.readlines()]
+        downloaded_book_ids = [row[0] for row in csv.reader(f, delimiter='\t')]
+
+downloaded_books = []
 
 for book in owned_books:
     book_id = book['id']
     book_time = book['publishingDate']
     book_title = book['title']
 
-    if book_time > cur_time or book_id in downloaded_books:
+    if book_id in downloaded_book_ids:
+        downloaded_books.append([book_id, book_title])
         continue
+
+    if book_time > cur_time:
+        continue
+
+    print('%s \t%s \t%s' % (book_title, book_id, book_time))
 
     book_file_name = book['titleslug'] + '.epub'
     book_file_path = os.path.join(download_target_dir, book_file_name)
-
-    print('%s \t%s \t%s' % (book_title, book_id, book_time))
 
     r = requests.get(
         'https://api.j-novel.club/api/volumes/%s/getpremiumebook' % book_id,
@@ -78,14 +89,14 @@ for book in owned_books:
         print(r.status_code, ': Book not available.')
         continue
 
-    new_books.append(book_id)
+    downloaded_books.append([book_id, book_title])
 
     with open(book_file_path, 'wb') as f:
         f.write(r.content)
 
-with open(downloaded_books_list_file, 'a') as f:
-    for book_id in new_books:
-        f.write(book_id + '\n')
+with open(downloaded_books_list_file, 'w') as f:
+    csv_writer = csv.writer(f, delimiter='\t')
+    csv_writer.writerows(downloaded_books)
 
 requests.post(
     'https://api.j-novel.club/api/users/logout',
