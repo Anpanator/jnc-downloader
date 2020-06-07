@@ -3,7 +3,7 @@ from __future__ import print_function
 import csv
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 import requests
 
@@ -19,7 +19,7 @@ login_pw = 'somepassword'
 
 download_target_dir = os.path.expanduser(download_target_dir)
 downloaded_books_list_file = os.path.expanduser(downloaded_books_list_file)
-cur_time = datetime.now().isoformat()[:23] + 'Z'
+cur_time = datetime.now(timezone.utc).isoformat()[:23] + 'Z'
 
 r = requests.post(
     'https://api.j-novel.club/api/users/login?include=user',
@@ -58,6 +58,7 @@ if os.path.exists(downloaded_books_list_file):
         downloaded_book_ids = [row[0] for row in csv.reader(f, delimiter='\t')]
 
 downloaded_books = []
+preordered_books = []
 
 for book in owned_books:
     book_id = book['id']
@@ -69,6 +70,7 @@ for book in owned_books:
         continue
 
     if book_time > cur_time:
+        preordered_books.append([book_title, book_id, book_time])
         continue
 
     print('%s \t%s \t%s' % (book_title, book_id, book_time))
@@ -104,3 +106,9 @@ requests.post(
 )
 
 print('Finished downloading and logged out')
+
+if len(preordered_books) > 0:
+    print('\nBooks scheduled to be released after %s' % cur_time)
+
+    for book_title, book_id, book_time in preordered_books:
+        print('%s  %s' % (book_time, book_title))
