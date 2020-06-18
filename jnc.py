@@ -1,10 +1,9 @@
 from __future__ import print_function
-
+from datetime import datetime, timezone
 import csv
 import os
 import sys
-from datetime import datetime, timezone
-
+from jnc_calls import login, request_owned_books
 import requests
 
 # Config: START
@@ -12,8 +11,8 @@ import requests
 download_target_dir = '~/Downloads/'
 downloaded_books_list_file = '~/.downloadedJncBooks'
 
-login_email = 'user@server.tld'
-login_pw = 'somepassword'
+login_email = 'user'
+login_pw = 'password'
 
 # Config: END
 
@@ -21,13 +20,7 @@ download_target_dir = os.path.expanduser(download_target_dir)
 downloaded_books_list_file = os.path.expanduser(downloaded_books_list_file)
 cur_time = datetime.now(timezone.utc).isoformat()[:23] + 'Z'
 
-r = requests.post(
-    'https://api.j-novel.club/api/users/login?include=user',
-    headers={'Accept': 'application/json', 'content-type': 'application/json'},
-    json={'email': login_email, 'password': login_pw}
-)
-
-login_response = r.json()
+login_response = login(login_email, login_pw)
 
 if 'error' in login_response:
     print('Login failed!')
@@ -37,13 +30,7 @@ auth_token = login_response['id']
 user_id = login_response['user']['id']
 user_name = login_response['user']['username']
 
-r = requests.get(
-    'https://api.j-novel.club/api/users/%s/' % user_id,
-    params={'filter': '{"include":[{"ownedBooks":"serie"}]}'},
-    headers={'Authorization': auth_token}
-)
-
-raw_account_details = r.json()
+raw_account_details = request_owned_books(user_id, auth_token)
 
 owned_books = raw_account_details['ownedBooks']
 
