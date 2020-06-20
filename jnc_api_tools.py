@@ -23,8 +23,6 @@ class JNClient:
     def request_owned_books(self):
         """Requests the list of owned books from JNC.
 
-        :param user_id the id of the user. Note that this is different from the user name (login email)
-        :param auth_token the token that's returned in the login response.
         :return dict with information on the owned books (ids, titles, etc.)"""
         return requests.get(
             self.API_USER_URL_PATTERN % self.user_id,
