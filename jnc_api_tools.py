@@ -9,6 +9,7 @@ class JNClient:
     API_USER_URL_PATTERN = BASE_URL + '/users/%s/'  # %s is the user id
     DOWNLOAD_BOOK_URL_PATTERN = BASE_URL + '/volumes/%s/getpremiumebook'  # %s is the book id
     LOGOUT_URL = BASE_URL + '/users/logout'
+    SERIES_INFO_URL = BASE_URL + '/series/findOne'
 
     def __init__(self, login_email, login_password):
         login_response = self.__login(login_email, login_password)
@@ -20,7 +21,7 @@ class JNClient:
         self.user_id = login_response['user']['id']
         self.user_name = login_response['user']['username']
 
-    def request_owned_books(self):
+    def get_owned_books(self):
         """Requests the list of owned books from JNC.
 
         :return dict with information on the owned books (ids, titles, etc.)"""
@@ -48,6 +49,14 @@ class JNClient:
             raise RuntimeError(str(r.status_code) + ': Book not available.')
 
         return r.content
+
+    def get_series_info(self, series_title_slug):
+        """Fetch information about a series from JNC, including the volumes of the series"""
+        filter_string = '{"where":{"titleslug":"%s"},"include":["volumes"]}' % series_title_slug
+        return requests.get(
+            self.SERIES_INFO_URL,
+            params={'filter': filter_string}
+        ).json()
 
     def __login(self, login_email, password):
         """Sends a login request to JNC. This method will not work if the user uses SSO (Google, Facebook)"""

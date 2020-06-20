@@ -28,7 +28,7 @@ download_target_dir = os.path.expanduser(download_target_dir)
 downloaded_books_list_file = os.path.expanduser(downloaded_books_list_file)
 cur_time = datetime.now(timezone.utc).isoformat()[:23] + 'Z'
 
-owned_books = jnclient.request_owned_books()
+owned_books = jnclient.get_owned_books()
 
 owned_books = sorted(
     owned_books,
