@@ -8,7 +8,7 @@ class JNClient:
     LOGIN_URL = BASE_URL + '/users/login?include=user'
     API_USER_URL_PATTERN = BASE_URL + '/users/%s/'  # %s is the user id
     DOWNLOAD_BOOK_URL_PATTERN = BASE_URL + '/volumes/%s/getpremiumebook'  # %s is the book id
-    LOGOUT_URL = 'https://api.j-novel.club/api/users/logout'
+    LOGOUT_URL = BASE_URL + '/users/logout'
 
     def __init__(self, login_email, login_password):
         login_response = self.__login(login_email, login_password)
