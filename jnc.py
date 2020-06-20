@@ -1,10 +1,9 @@
 from __future__ import print_function
-from datetime import datetime, timezone
-import csv
-import os
 import sys
-from jnc_calls import login, request_owned_books
-import requests
+import os
+import csv
+from datetime import datetime, timezone
+from jnc_api_tools import JNClient
 
 # Config: START
 
@@ -15,24 +14,21 @@ login_email = 'user'
 login_pw = 'password'
 
 # Config: END
+try:
+    jnclient = JNClient(login_email, login_pw)
+except RuntimeError as err:
+    print(err)
+    sys.exit(1)
+
+# overwrite credentials to make sure they're not used later
+login_email = None
+login_pw = None
 
 download_target_dir = os.path.expanduser(download_target_dir)
 downloaded_books_list_file = os.path.expanduser(downloaded_books_list_file)
 cur_time = datetime.now(timezone.utc).isoformat()[:23] + 'Z'
 
-login_response = login(login_email, login_pw)
-
-if 'error' in login_response:
-    print('Login failed!')
-    sys.exit()
-
-auth_token = login_response['id']
-user_id = login_response['user']['id']
-user_name = login_response['user']['username']
-
-raw_account_details = request_owned_books(user_id, auth_token)
-
-owned_books = raw_account_details['ownedBooks']
+owned_books = jnclient.request_owned_books()
 
 owned_books = sorted(
     owned_books,
@@ -65,34 +61,21 @@ for book in owned_books:
     book_file_name = book['titleslug'] + '.epub'
     book_file_path = os.path.join(download_target_dir, book_file_name)
 
-    r = requests.get(
-        'https://api.j-novel.club/api/volumes/%s/getpremiumebook' % book_id,
-        params={
-            'userId': user_id,
-            'userName': user_name,
-            'access_token': auth_token
-        }, allow_redirects=False
-    )
+    try:
+        book_content = jnclient.download_book(book_id)
 
-    if r.status_code != 200:
-        print(r.status_code, ': Book not available.')
-        continue
+        downloaded_books.append([book_id, book_title])
 
-    downloaded_books.append([book_id, book_title])
+        with open(book_file_path, 'wb') as f:
+            f.write(book_content)
+    except RuntimeError as err:
+        print(err)
 
-    with open(book_file_path, 'wb') as f:
-        f.write(r.content)
+del jnclient
 
 with open(downloaded_books_list_file, 'w') as f:
     csv_writer = csv.writer(f, delimiter='\t')
     csv_writer.writerows(downloaded_books)
-
-requests.post(
-    'https://api.j-novel.club/api/users/logout',
-    headers={'Authorization': auth_token}
-)
-
-print('Finished downloading and logged out')
 
 if len(preordered_books) > 0:
     print('\nBooks scheduled to be released after %s' % cur_time)
