@@ -52,6 +52,9 @@ class JNClient:
 
     def download_book(self, book_id):
         """Will attempt to download a book from JNC
+        JNC does not respond with a standard 404 error when a book cannot be found (despite being marked as published)
+        and instead will do a redirect to an error page, which itself reports a http 200
+
         :param book_id the id of the book.
         :return The response content
         :raise JNCApiError when the book is not available for download yet."""
