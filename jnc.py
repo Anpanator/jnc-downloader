@@ -23,6 +23,10 @@ except JNCApiError as err:
     print(err)
     sys.exit(1)
 
+# overwrite credentials to make sure they're not used later
+login_email = None
+login_pw = None
+
 
 def read_owned_series_file(file_path):
     """:return dictionary like {"title_slug": boolean}"""
@@ -62,10 +66,6 @@ if not os.path.isfile(downloaded_books_list_file):
 owned_series_file = os.path.expanduser(owned_series_file)
 if not os.path.isfile(owned_series_file):
     open(owned_series_file, 'a').close()
-
-# overwrite credentials to make sure they're not used later
-login_email = None
-login_pw = None
 
 cur_time = datetime.now(timezone.utc).isoformat()[:23] + 'Z'
 
