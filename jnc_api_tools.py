@@ -21,6 +21,7 @@ class JNClient:
         self.auth_token = login_response['id']
         self.user_id = login_response['user']['id']
         self.user_name = login_response['user']['username']
+        self.available_credits = login_response['user']['earnedCredits'] - login_response['user']['usedCredits']
 
     def get_owned_books(self):
         """Requests the list of owned books from JNC.
@@ -38,6 +39,9 @@ class JNClient:
             422 = book already ordered
         :param book_title_slug the full title slug of the book, e.g. an-archdemon-s-dilemma-how-to-love-your-elf-bride-volume-9
         """
+        if self.available_credits <= 0:
+            raise NoCreditsError('No credits available to order book!')
+
         response = requests.post(
             self.ORDER_URL % self.user_id,
             json={'titleslug': book_title_slug},
@@ -49,6 +53,7 @@ class JNClient:
 
         if not response.ok:
             raise JNCApiError('Error when ordering book')
+        self.available_credits -= 1
 
     def download_book(self, book_id):
         """Will attempt to download a book from JNC
@@ -106,5 +111,9 @@ class JNClient:
 
 
 class JNCApiError(Exception):
-    """Exception for JNC errors"""
+    """Exception for JNC API errors"""
+    pass
+
+
+class NoCreditsError(Exception):
     pass

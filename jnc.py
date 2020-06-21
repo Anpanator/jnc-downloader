@@ -1,6 +1,5 @@
 from __future__ import print_function
 
-import json
 import sys
 import os
 import csv
@@ -26,7 +25,7 @@ except JNCApiError as err:
 # overwrite credentials to make sure they're not used later
 login_email = None
 login_pw = None
-
+print('Available premium credits: %i' % jnclient.available_credits)
 
 def read_owned_series_file(file_path):
     """:return dictionary like {"title_slug": boolean}"""
@@ -57,6 +56,17 @@ def download_book(book_id, book_title, downloaded_books):
         print(err)
 
 
+def print_new_volumes(books_to_order):
+    print('\nThe following new books of series you follow can be ordered:')
+    for book_id in books_to_order:
+        print(books_to_order[book_id]['title'])
+
+
+def user_confirm(message):
+    answer = input(message + ' (y/n)')
+    return True if answer == 'y' else False
+
+
 download_target_dir = os.path.expanduser(download_target_dir)
 
 downloaded_books_list_file = os.path.expanduser(downloaded_books_list_file)
@@ -85,8 +95,9 @@ series_follow_states = read_owned_series_file(owned_series_file)
 # New volumes from followed series will be ordered automatically
 for series_title_slug in owned_series:
     if series_title_slug not in series_follow_states:
-        should_follow = input('%s is a new series. Do you want to follow it? (y/n)' % series_title_slug)
-        series_follow_states[series_title_slug] = True if should_follow == 'y' else False
+        series_follow_states[series_title_slug] = user_confirm(
+            '%s is a new series. Do you want to follow it?' % series_title_slug
+        )
 
 store_owned_series_file(owned_series_file, series_follow_states)
 
@@ -140,8 +151,12 @@ if len(preordered_books) > 0:
     for book_title, book_id, book_time in preordered_books:
         print('%s  %s' % (book_time, book_title))
 
-print('\nThe following new books of series you follow can be ordered:')
+print_new_volumes(books_to_order)
+
 for book_id in books_to_order:
-    print(books_to_order[book_id]['title'])
+    if user_confirm('Do you want to order %s?' % books_to_order[book_id]['title']):
+        jnclient.order_book(books_to_order[book_id]['titleslug'])
+        print('Order successful! Remaining credits: %i' % jnclient.available_credits)
+
 
 del jnclient
