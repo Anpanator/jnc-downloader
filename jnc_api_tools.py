@@ -10,12 +10,13 @@ class JNClient:
     DOWNLOAD_BOOK_URL_PATTERN = BASE_URL + '/volumes/%s/getpremiumebook'  # %s is the book id
     LOGOUT_URL = BASE_URL + '/users/logout'
     SERIES_INFO_URL = BASE_URL + '/series/findOne'
+    ORDER_URL = BASE_URL + '/users/%s/redeemcredit'  # %s is user id
 
     def __init__(self, login_email, login_password):
         login_response = self.__login(login_email, login_password)
 
         if 'error' in login_response:
-            raise RuntimeError('Login failed!')
+            raise JNCApiError('Login failed!')
 
         self.auth_token = login_response['id']
         self.user_id = login_response['user']['id']
@@ -31,11 +32,29 @@ class JNClient:
             headers={'Authorization': self.auth_token}
         ).json()['ownedBooks']
 
+    def order_book(self, book_title_slug):
+        """Order book on JNC side, i.e. redeem premium credit
+        Notable non-success responses:
+            422 = book already ordered
+        :param book_title_slug the full title slug of the book, e.g. an-archdemon-s-dilemma-how-to-love-your-elf-bride-volume-9
+        """
+        response = requests.post(
+            self.ORDER_URL % self.user_id,
+            json={'titleslug': book_title_slug},
+            headers={'Authorization': self.auth_token}
+        )
+
+        if response.status_code == 422:
+            raise JNCApiError('Book already ordered')
+
+        if not response.ok:
+            raise JNCApiError('Error when ordering book')
+
     def download_book(self, book_id):
         """Will attempt to download a book from JNC
         :param book_id the id of the book.
         :return The response content
-        :raise RuntimeError when the book is not available for download yet."""
+        :raise JNCApiError when the book is not available for download yet."""
         r = requests.get(
             self.DOWNLOAD_BOOK_URL_PATTERN % book_id,
             params={
@@ -46,7 +65,7 @@ class JNClient:
         )
 
         if r.status_code != 200:
-            raise RuntimeError(str(r.status_code) + ': Book not available.')
+            raise JNCApiError(str(r.status_code) + ': Book not available.')
 
         return r.content
 
@@ -81,3 +100,8 @@ class JNClient:
                 self.__logout()
         except AttributeError:
             pass
+
+
+class JNCApiError(Exception):
+    """Exception for JNC errors"""
+    pass

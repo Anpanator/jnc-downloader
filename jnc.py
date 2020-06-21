@@ -3,7 +3,7 @@ import sys
 import os
 import csv
 from datetime import datetime, timezone
-from jnc_api_tools import JNClient
+from jnc_api_tools import JNClient, JNCApiError
 
 # Config: START
 
@@ -16,7 +16,7 @@ login_pw = 'password'
 # Config: END
 try:
     jnclient = JNClient(login_email, login_pw)
-except RuntimeError as err:
+except JNCApiError as err:
     print(err)
     sys.exit(1)
 
@@ -68,10 +68,8 @@ for book in owned_books:
 
         with open(book_file_path, 'wb') as f:
             f.write(book_content)
-    except RuntimeError as err:
+    except JNCApiError as err:
         print(err)
-
-del jnclient
 
 with open(downloaded_books_list_file, 'w') as f:
     csv_writer = csv.writer(f, delimiter='\t')
@@ -82,3 +80,5 @@ if len(preordered_books) > 0:
 
     for book_title, book_id, book_time in preordered_books:
         print('%s  %s' % (book_time, book_title))
+
+del jnclient
