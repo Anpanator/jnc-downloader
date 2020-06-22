@@ -1,4 +1,6 @@
+#!/usr/bin/env python3
 from __future__ import print_function
+from argparse import ArgumentParser
 
 import sys
 import os
@@ -16,6 +18,56 @@ owned_series_file = '~/.jncOwnedSeries.csv'  # Format series_title_slug + \t + f
 
 # Config: END
 
+parser = ArgumentParser()
+parser.add_argument("--order",
+                    dest="order",
+                    action='store_const',
+                    const=True,
+                    default=False,
+                    help="Enables ordering books. Each order requires confirmation by default."
+                    )
+parser.add_argument("--credits",
+                    dest="credits",
+                    action='store_const',
+                    const=True,
+                    default=False,
+                    help="Enables buying credits. Each purchase requires confirmation by default."
+                    )
+parser.add_argument("--no-confirm-all",
+                    dest="no_confirm_all",
+                    action='store_const',
+                    const=True,
+                    default=False,
+                    help="Disable all user confirmations and assume 'yes'. USE WITH CAUTION!!! This can spend money!"
+                    )
+parser.add_argument("--no-confirm-order",
+                    dest="no_confirm_order",
+                    action='store_const',
+                    const=True,
+                    default=False,
+                    help="Disable user confirmations for ordering books and assume 'yes'. USE WITH CAUTION!!! This can spend money!"
+                    )
+parser.add_argument("--no-confirm-credits",
+                    dest="no_confirm_credits",
+                    action='store_const',
+                    const=True,
+                    default=False,
+                    help="Disable user confirmations for buying premium credits and assume 'yes'. USE WITH CAUTION!!! This can spend money!"
+                    )
+parser.add_argument("--no-confirm-series-follow",
+                    dest="no_confirm_series",
+                    action='store_const',
+                    const=True,
+                    default=False,
+                    help="Disable user confirmation for following new series."
+                    )
+args = parser.parse_args()
+enable_order_books = args.order
+enable_buy_credits = args.credits
+no_confirm_order = args.no_confirm_all or args.no_confirm_order
+no_confirm_series = args.no_confirm_all or args.no_confirm_series
+no_confirm_credits = args.no_confirm_all or args.no_confirm_credits
+
 try:
     jnclient = JNClient(login_email, login_pw)
 except JNCApiError as err:
@@ -26,6 +78,7 @@ except JNCApiError as err:
 login_email = None
 login_pw = None
 print('Available premium credits: %i' % jnclient.available_credits)
+
 
 def read_owned_series_file(file_path):
     """:return dictionary like {"title_slug": boolean}"""
@@ -57,9 +110,43 @@ def download_book(book_id, book_title, downloaded_books):
 
 
 def print_new_volumes(books_to_order):
-    print('\nThe following new books of series you follow can be ordered:')
+    if len(books_to_order) > 0:
+        print('\nThe following new books of series you follow can be ordered:')
     for book_id in books_to_order:
         print(books_to_order[book_id]['title'])
+
+
+def buy_credits(credits_to_buy, no_confirm):
+    print('Attempting to buy %i credits.' % credits_to_buy)
+    unit_price = jnclient.get_premium_credit_price()
+    print('Each premium credit will cost US$%i' % unit_price)
+    while credits_to_buy > 0:
+        purchase_batch = 10 if credits_to_buy > 10 else credits_to_buy
+        price = purchase_batch * unit_price
+        if no_confirm or user_confirm('Do you want to buy %i premium credits for US$%i?' % (purchase_batch, price)):
+            jnclient.buy_credits(credits_to_buy)
+            print('Successfully bought %i premium credits. ' % purchase_batch)
+            credits_to_buy -= purchase_batch
+            print('%i premium credits left to buy.\n' % credits_to_buy)
+        else:
+            # abort when user does not confirm
+            break
+        print('\n')
+
+
+def order_books(books_to_order, no_confirm, buy_individual_credits):
+    for book_id in books_to_order:
+        print('Order book %s' % books_to_order[book_id]['title'])
+        if no_confirm or user_confirm('Do you want to order?'):
+            if (jnclient.available_credits == 0) and buy_individual_credits:
+                buy_credits(1, False)
+            if jnclient.available_credits == 0:
+                print('No premium credits left. Stop order process.')
+                return
+            jnclient.order_book(books_to_order[book_id]['titleslug'])
+            print(
+                'Ordered %s! Remaining credits: %i\n' % (books_to_order[book_id]['title'], jnclient.available_credits)
+            )
 
 
 def user_confirm(message):
@@ -80,11 +167,6 @@ if not os.path.isfile(owned_series_file):
 cur_time = datetime.now(timezone.utc).isoformat()[:23] + 'Z'
 
 owned_books = jnclient.get_owned_books()
-
-owned_books = sorted(
-    owned_books,
-    key=lambda book: (book['serie']['titleslug'], book['volumeNumber']))
-
 owned_series = set()
 for book in owned_books:
     owned_series.add(book['serie']['titleslug'])
@@ -95,7 +177,7 @@ series_follow_states = read_owned_series_file(owned_series_file)
 # New volumes from followed series will be ordered automatically
 for series_title_slug in owned_series:
     if series_title_slug not in series_follow_states:
-        series_follow_states[series_title_slug] = user_confirm(
+        series_follow_states[series_title_slug] = no_confirm_series or user_confirm(
             '%s is a new series. Do you want to follow it?' % series_title_slug
         )
 
@@ -106,8 +188,41 @@ if os.path.exists(downloaded_books_list_file):
     with open(downloaded_books_list_file, mode='r', newline='') as f:
         downloaded_book_ids = [row[0] for row in csv.reader(f, delimiter='\t')]
 
+books_to_order = {}
+# Check for new volumes in followed series
+for series_title_slug in series_follow_states:
+    if series_follow_states[series_title_slug]:
+        series_info = jnclient.get_series_info(series_title_slug)
+        for volume in series_info['volumes']:
+            # Check if the volume is not yet owned
+            if not any(d['id'] == volume['id'] for d in owned_books):
+                books_to_order[volume['id']] = {'titleslug': volume['titleslug'], 'title': volume['title']}
+
+print_new_volumes(books_to_order)
+books_to_order_amount = len(books_to_order)
+if enable_order_books and books_to_order_amount > 0:
+    print(
+        '\nTo buy all books, you will need %i premium credits, you have %i' %
+        (books_to_order_amount, jnclient.available_credits)
+    )
+    if enable_buy_credits:
+        print(
+            'If you do not buy all credits at once, you will be asked to buy credits for each volume once you run out\n')
+        buy_credits(books_to_order_amount - jnclient.available_credits, no_confirm_credits)
+
+if enable_order_books:
+    order_books(books_to_order, no_confirm_order, enable_buy_credits)
+
+print('\nDownloading books:')
 downloaded_books = {}
 preordered_books = []
+if enable_order_books:
+    # fetch owned books again to include the volumes that may have been ordered
+    owned_books = jnclient.get_owned_books()
+
+owned_books = sorted(
+    owned_books,
+    key=lambda book: (book['serie']['titleslug'], book['volumeNumber']))
 
 for book in owned_books:
     book_id = book['id']
@@ -129,16 +244,6 @@ for book in owned_books:
 
     download_book(book_id, book_title, downloaded_books)
 
-books_to_order = {}
-# Check for new volumes in followed series
-for series_title_slug in series_follow_states:
-    if series_follow_states[series_title_slug]:
-        series_info = jnclient.get_series_info(series_title_slug)
-        for volume in series_info['volumes']:
-            # Check if the volume is not yet owned
-            if not any(d['id'] == volume['id'] for d in owned_books):
-                books_to_order[volume['id']] = {'titleslug': volume['titleslug'], 'title': volume['title']}
-
 # Save list of books that were downloaded
 with open(downloaded_books_list_file, mode='w', newline='') as f:
     csv_writer = csv.writer(f, delimiter='\t')
@@ -146,17 +251,9 @@ with open(downloaded_books_list_file, mode='w', newline='') as f:
 
 # Print unreleased preorders
 if len(preordered_books) > 0:
-    print('\nBooks scheduled to be released after %s' % cur_time)
+    print('\nPre-ordered books that are not released yet (Release date / Title):')
 
     for book_title, book_id, book_time in preordered_books:
         print('%s  %s' % (book_time, book_title))
-
-print_new_volumes(books_to_order)
-
-for book_id in books_to_order:
-    if user_confirm('Do you want to order %s?' % books_to_order[book_id]['title']):
-        jnclient.order_book(books_to_order[book_id]['titleslug'])
-        print('Order successful! Remaining credits: %i' % jnclient.available_credits)
-
 
 del jnclient

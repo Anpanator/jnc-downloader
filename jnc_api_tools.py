@@ -6,11 +6,14 @@ class JNClient:
 
     BASE_URL = 'https://api.j-novel.club/api'
     LOGIN_URL = BASE_URL + '/users/login?include=user'
-    API_USER_URL_PATTERN = BASE_URL + '/users/%s/'  # %s is the user id
-    DOWNLOAD_BOOK_URL_PATTERN = BASE_URL + '/volumes/%s/getpremiumebook'  # %s is the book id
     LOGOUT_URL = BASE_URL + '/users/logout'
     SERIES_INFO_URL = BASE_URL + '/series/findOne'
-    ORDER_URL = BASE_URL + '/users/%s/redeemcredit'  # %s is user id
+    API_USER_URL_PATTERN = BASE_URL + '/users/%s/'  # %s is the user id
+    DOWNLOAD_BOOK_URL_PATTERN = BASE_URL + '/volumes/%s/getpremiumebook'  # %s is the book id
+    ORDER_URL_PATTERN = BASE_URL + '/users/%s/redeemcredit'  # %s is user id
+    BUY_CREDITS_URL_PATTERN = BASE_URL + '/users/%s/purchasecredit'  # %s is user id
+
+    ACCOUNT_TYPE_PREMIUM = 'PremiumMembership'
 
     def __init__(self, login_email, login_password):
         login_response = self.__login(login_email, login_password)
@@ -22,6 +25,7 @@ class JNClient:
         self.user_id = login_response['user']['id']
         self.user_name = login_response['user']['username']
         self.available_credits = login_response['user']['earnedCredits'] - login_response['user']['usedCredits']
+        self.account_type = login_response['user']['currentSubscription']['plan']['id']
 
     def get_owned_books(self):
         """Requests the list of owned books from JNC.
@@ -43,7 +47,7 @@ class JNClient:
             raise NoCreditsError('No credits available to order book!')
 
         response = requests.post(
-            self.ORDER_URL % self.user_id,
+            self.ORDER_URL_PATTERN % self.user_id,
             json={'titleslug': book_title_slug},
             headers={'Authorization': self.auth_token}
         )
@@ -85,6 +89,34 @@ class JNClient:
             params={'filter': filter_string}
         ).json()
 
+    def buy_credits(self, amount):
+        """Buy premium credits on JNC. Max. amount: 10. Price depends on membership status."""
+        if type(amount) is not int or (amount > 10) or (amount <= 0):
+            raise ArgumentError('It is not possible to buy less than 1 or mor than 10 credits.')
+
+        response = requests.post(
+            self.BUY_CREDITS_URL_PATTERN % self.user_id,
+            headers={
+                'Accept': 'application/json',
+                'content-type': 'application/json',
+                'Authorization': self.auth_token
+            },
+            json={'number': amount},
+            allow_redirects=False
+        )
+
+        if not response.status_code < 300:
+            raise JNCApiError('Could not purchase credits!')
+
+        self.available_credits += amount
+
+    def get_premium_credit_price(self):
+        """Determines the price of premium credits based on account status"""
+        if self.account_type == self.ACCOUNT_TYPE_PREMIUM:
+            return 6
+        else:
+            return 7
+
     def __login(self, login_email, password):
         """Sends a login request to JNC. This method will not work if the user uses SSO (Google, Facebook)"""
         return requests.post(
@@ -116,4 +148,8 @@ class JNCApiError(Exception):
 
 
 class NoCreditsError(Exception):
+    pass
+
+
+class ArgumentError(Exception):
     pass
