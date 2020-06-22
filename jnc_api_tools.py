@@ -92,7 +92,7 @@ class JNClient:
     def buy_credits(self, amount):
         """Buy premium credits on JNC. Max. amount: 10. Price depends on membership status."""
         if type(amount) is not int or (amount > 10) or (amount <= 0):
-            raise ArgumentError('It is not possible to buy less than 1 or mor than 10 credits.')
+            raise ArgumentError('It is not possible to buy less than 1 or more than 10 credits.')
 
         response = requests.post(
             self.BUY_CREDITS_URL_PATTERN % self.user_id,

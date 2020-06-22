@@ -124,7 +124,7 @@ def buy_credits(credits_to_buy, no_confirm):
         purchase_batch = 10 if credits_to_buy > 10 else credits_to_buy
         price = purchase_batch * unit_price
         if no_confirm or user_confirm('Do you want to buy %i premium credits for US$%i?' % (purchase_batch, price)):
-            jnclient.buy_credits(credits_to_buy)
+            jnclient.buy_credits(purchase_batch)
             print('Successfully bought %i premium credits. ' % purchase_batch)
             credits_to_buy -= purchase_batch
             print('%i premium credits left to buy.\n' % credits_to_buy)
