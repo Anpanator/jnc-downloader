@@ -1,3 +1,7 @@
+import csv
+from datetime import datetime, timezone
+import os
+
 import requests
 
 
@@ -39,9 +43,12 @@ class JNClient:
 
     def order_book(self, book_title_slug):
         """Order book on JNC side, i.e. redeem premium credit
+
         Notable non-success responses:
             422 = book already ordered
-        :param book_title_slug the full title slug of the book, e.g. an-archdemon-s-dilemma-how-to-love-your-elf-bride-volume-9
+
+        :param book_title_slug the full title slug of the book,
+                               e.g. an-archdemon-s-dilemma-how-to-love-your-elf-bride-volume-9
         """
         if self.available_credits <= 0:
             raise NoCreditsError('No credits available to order book!')
@@ -140,6 +147,218 @@ class JNClient:
                 self.__logout()
         except AttributeError:
             pass
+
+
+class JNCDataHandler:
+    def __init__(self, jnclient, owned_series_csv_path, owned_books_csv_path, download_dir, no_confirm_series=False,
+                 no_confirm_credits=False, no_confirm_order=False):
+        self.jnclient = jnclient
+        self.owned_books = None
+        self.owned_series = None
+        self.followed_series_details = None
+        self.series_follow_states = None
+        self.downloaded_book_ids = None
+        self.downloaded_books = {}
+        self.preordered_books = {}
+        self.unowned_books = None
+        self.no_confirm_series = no_confirm_series
+        self.no_confirm_credits = no_confirm_credits
+        self.no_confirm_order = no_confirm_order
+
+        self.cur_time = datetime.now(timezone.utc).isoformat()[:23] + 'Z'
+
+        self.download_target_dir = os.path.expanduser(download_dir)
+        self.downloaded_books_list_file = os.path.expanduser(owned_books_csv_path)
+        self.owned_series_file = os.path.expanduser(owned_series_csv_path)
+
+        self.__ensure_files_exist()
+        self.read_downloaded_books_file()
+        self.read_owned_series_file()
+
+    def load_owned_books(self):
+        owned_books = self.jnclient.get_owned_books()
+
+        self.owned_books = sorted(
+            owned_books,
+            key=lambda book: (book['serie']['titleslug'], book['volumeNumber']))
+
+    def load_owned_series(self):
+        self.owned_series = set()
+        for book in self.owned_books:
+            self.owned_series.add(book['serie']['titleslug'])
+
+    def handle_new_series(self):
+        """"Ask the user if he wants to follow a new series he owns"""
+        for series_title_slug in self.owned_series:
+            if series_title_slug not in self.series_follow_states:
+                self.series_follow_states[series_title_slug] = self.no_confirm_series or self.user_confirm(
+                    '%s is a new series. Do you want to follow it?' % series_title_slug
+                )
+
+    def read_owned_series_file(self):
+        series_follow_states = {}
+        with open(self.owned_series_file, mode='r', newline='') as file:
+            csv_reader = csv.reader(file, delimiter='\t')
+            for series_row in csv_reader:
+                series_follow_states[series_row[0]] = True if series_row[1] == 'True' else False
+        self.series_follow_states = series_follow_states
+
+    def read_downloaded_books_file(self):
+        self.downloaded_book_ids = set()
+        with open(self.downloaded_books_list_file, mode='r', newline='') as f:
+            self.downloaded_book_ids = [row[0] for row in csv.reader(f, delimiter='\t')]
+
+    def download_book(self, book):
+        """:param book a single element from self.owned_books"""
+        try:
+            book_id = book['id']
+            book_title = book['title']
+            book_slug = book['titleslug']
+
+            book_content = self.jnclient.download_book(book_id)
+
+            book_file_name = book_slug + '.epub'
+            book_file_path = os.path.join(self.download_target_dir, book_file_name)
+
+            with open(book_file_path, mode='wb') as f:
+                f.write(book_content)
+
+            self.downloaded_books[book_id] = book_title
+        except JNCApiError as err:
+            print(err)
+
+    def load_followed_series_details(self):
+        self.followed_series_details = {}
+        for series_title_slug in self.series_follow_states:
+            if self.series_follow_states[series_title_slug]:
+                self.followed_series_details[series_title_slug] = self.jnclient.get_series_info(series_title_slug)
+
+    def load_unowned_books(self):
+        self.unowned_books = {}
+        """Check for new volumes in followed series"""
+        for title_slug in self.followed_series_details:
+            for volume in self.followed_series_details[title_slug]['volumes']:
+                # Check if the volume is not yet owned
+                if not any(d['id'] == volume['id'] for d in self.owned_books):
+                    self.unowned_books[volume['id']] = {'titleslug': volume['titleslug'], 'title': volume['title']}
+
+    def load_preordered_books(self):
+        for book in self.owned_books:
+            book_id = book['id']
+            book_time = book['publishingDate']
+            book_title = book['title']
+
+            if book_time > self.cur_time:
+                self.preordered_books[book_id] = {'title': book_title, 'id': book_id, 'time': book_time}
+
+    def download_new_books(self):
+        print('\nDownloading new books:')
+
+        for book in self.owned_books:
+            book_id = book['id']
+            book_time = book['publishingDate']
+            book_title = book['title']
+
+            if book_id in self.downloaded_book_ids:
+                self.downloaded_books[book_id] = book_title
+                continue
+
+            if book_id in self.preordered_books:
+                continue
+
+            print('%s \t%s \t%s' % (book_title, book_id, book_time))
+
+            self.download_book(book)
+
+    def buy_credits(self, credits_to_buy):
+        print('\nAttempting to buy %i credits.' % credits_to_buy)
+        unit_price = self.jnclient.get_premium_credit_price()
+        print('Each premium credit will cost US$%i' % unit_price)
+        while credits_to_buy > 0:
+            purchase_batch = 10 if credits_to_buy > 10 else credits_to_buy
+            price = purchase_batch * unit_price
+            if self.no_confirm_credits \
+                    or self.user_confirm('Do you want to buy %i premium credits for US$%i?' % (purchase_batch, price)):
+                self.jnclient.buy_credits(purchase_batch)
+                print('Successfully bought %i premium credits. ' % purchase_batch)
+                credits_to_buy -= purchase_batch
+                print('%i premium credits left to buy.' % credits_to_buy)
+            else:
+                # abort when user does not confirm
+                break
+            print('\n')
+
+    def order_unowned_books(self, buy_individual_credits):
+        print('\nOrdering unowned volumes of followed series:')
+        new_books_ordered = False
+        for book_id in self.unowned_books:
+            print('Order book %s' % self.unowned_books[book_id]['title'])
+            if self.no_confirm_order or self.user_confirm('Do you want to order?'):
+                if (self.jnclient.available_credits == 0) and buy_individual_credits:
+                    self.buy_credits(1)
+                if self.jnclient.available_credits == 0:
+                    print('No premium credits left. Stop order process.')
+                    break
+                self.jnclient.order_book(self.unowned_books[book_id]['titleslug'])
+                print(
+                    'Ordered %s! Remaining credits: %i\n'
+                    % (self.unowned_books[book_id]['title'], self.jnclient.available_credits)
+                )
+                new_books_ordered = True
+        if new_books_ordered:
+            # refresh data
+            self.load_owned_books()
+            self.load_preordered_books()
+
+    def unfollow_complete_series(self):
+        for series_title_slug in self.followed_series_details:
+            series_has_new_volumes = False
+            if 'fully translated' in self.followed_series_details[series_title_slug]['tags']:
+                for volume in self.followed_series_details[series_title_slug]['volumes']:
+                    book_id = volume['id']
+                    if book_id not in self.downloaded_book_ids and book_id not in self.preordered_books:
+                        series_has_new_volumes = True
+                if not series_has_new_volumes:
+                    print('%s is fully owned and completed. Series will not be followed anymore.'
+                          % self.followed_series_details[series_title_slug]['title'])
+                    self.series_follow_states[series_title_slug] = False
+
+    def write_owned_series_file(self):
+        with open(self.owned_series_file, mode='w', newline='') as f:
+            series_csv_writer = csv.writer(f, delimiter='\t')
+            series_csv_writer.writerows(self.series_follow_states.items())
+
+    def write_downloaded_books_file(self):
+        with open(self.downloaded_books_list_file, mode='w', newline='') as f:
+            csv_writer = csv.writer(f, delimiter='\t')
+            csv_writer.writerows(self.downloaded_books.items())
+
+    def print_new_volumes(self):
+        if len(self.unowned_books) > 0:
+            print('\nThe following new books of series you follow can be ordered:')
+        for book_id in self.unowned_books:
+            print(self.unowned_books[book_id]['title'])
+
+    def print_preorders(self):
+        if len(self.preordered_books):
+            print('\nCurrent preorders (Release Date / Title):')
+        for book_id in self.preordered_books:
+            print('%s  %s' % (self.preordered_books[book_id]['time'], self.preordered_books[book_id]['title']))
+
+    def __ensure_files_exist(self):
+        if not os.path.isfile(self.owned_series_file):
+            open(self.owned_series_file, 'a').close()
+        if not os.path.isfile(self.downloaded_books_list_file):
+            open(self.downloaded_books_list_file, 'a').close()
+
+    @staticmethod
+    def user_confirm(message):
+        answer = input(message + ' (y/n)')
+        return True if answer == 'y' else False
+
+
+class JNCBook:
+    pass
 
 
 class JNCApiError(Exception):
