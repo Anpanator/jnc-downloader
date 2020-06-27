@@ -70,26 +70,28 @@ try:
 except JNCApiError as err:
     print(err)
     sys.exit(1)
-
-jncprocessor = JNCDataHandler(jnclient, owned_series_file, downloaded_books_list_file, download_target_dir,
-                              no_confirm_series, no_confirm_credits, no_confirm_order)
-
 # overwrite credentials to make sure they're not used later
 login_email = None
 login_pw = None
+
+handler = JNCDataHandler(jnclient, owned_series_file, downloaded_books_list_file, download_target_dir,
+                         no_confirm_series, no_confirm_credits, no_confirm_order)
+
 print('Available premium credits: %i' % jnclient.available_credits)
-jncprocessor.read_owned_series_file()
-jncprocessor.read_downloaded_books_file()
+handler.read_owned_series_file()
+handler.read_downloaded_books_file()
 
-jncprocessor.load_owned_books()
-jncprocessor.load_owned_series()
-jncprocessor.load_preordered_books()
-jncprocessor.load_unowned_books()
+handler.load_owned_books()
+handler.load_owned_series()
+handler.load_preordered_books()
+handler.load_followed_series_details()
+handler.load_unowned_books()
 
-jncprocessor.handle_new_series()
+handler.handle_new_series()
 
-jncprocessor.print_new_volumes()
-unowned_books_amount = len(jncprocessor.unowned_books)
+handler.print_new_volumes()
+
+unowned_books_amount = len(handler.unowned_books)
 if enable_order_books:
     buy_individual_credits = False
     if enable_buy_credits and unowned_books_amount > 0:
@@ -98,17 +100,17 @@ if enable_order_books:
             (unowned_books_amount, jnclient.available_credits)
         )
         print(
-            'If you do not buy all credits at once, you will be asked to buy credits for each volume once you run out\n')
-        jncprocessor.buy_credits(unowned_books_amount - jnclient.available_credits)
+            'If you do not buy all credits at once, you will be asked to buy credits for each volume once you run out')
+        handler.buy_credits(unowned_books_amount - jnclient.available_credits)
     else:
         buy_individual_credits = True if enable_buy_credits else False
-    jncprocessor.order_unowned_books(buy_individual_credits)
+    handler.order_unowned_books(buy_individual_credits)
 
-jncprocessor.print_preorders()
-jncprocessor.download_new_books()
-
-jncprocessor.write_owned_series_file()
-jncprocessor.write_downloaded_books_file()
+handler.print_preorders()
+handler.download_new_books()
+handler.write_downloaded_books_file()
+handler.unfollow_complete_series()
+handler.write_owned_series_file()
 
 del jnclient
-del jncprocessor
+del handler

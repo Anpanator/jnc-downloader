@@ -155,6 +155,7 @@ class JNCDataHandler:
         self.jnclient = jnclient
         self.owned_books = None
         self.owned_series = None
+        self.followed_series_details = None
         self.series_follow_states = None
         self.downloaded_book_ids = None
         self.downloaded_books = {}
@@ -226,16 +227,20 @@ class JNCDataHandler:
         except JNCApiError as err:
             print(err)
 
+    def load_followed_series_details(self):
+        self.followed_series_details = {}
+        for series_title_slug in self.series_follow_states:
+            if self.series_follow_states[series_title_slug]:
+                self.followed_series_details[series_title_slug] = self.jnclient.get_series_info(series_title_slug)
+
     def load_unowned_books(self):
         self.unowned_books = {}
         """Check for new volumes in followed series"""
-        for series_title_slug in self.series_follow_states:
-            if self.series_follow_states[series_title_slug]:
-                series_info = self.jnclient.get_series_info(series_title_slug)
-                for volume in series_info['volumes']:
-                    # Check if the volume is not yet owned
-                    if not any(d['id'] == volume['id'] for d in self.owned_books):
-                        self.unowned_books[volume['id']] = {'titleslug': volume['titleslug'], 'title': volume['title']}
+        for title_slug in self.followed_series_details:
+            for volume in self.followed_series_details[title_slug]['volumes']:
+                # Check if the volume is not yet owned
+                if not any(d['id'] == volume['id'] for d in self.owned_books):
+                    self.unowned_books[volume['id']] = {'titleslug': volume['titleslug'], 'title': volume['title']}
 
     def load_preordered_books(self):
         for book in self.owned_books:
@@ -303,6 +308,19 @@ class JNCDataHandler:
         if new_books_ordered:
             # refresh owned books list
             self.load_owned_books()
+
+    def unfollow_complete_series(self):
+        for series_title_slug in self.followed_series_details:
+            series_has_new_volumes = False
+            if 'fully translated' in self.followed_series_details[series_title_slug]['tags']:
+                for volume in self.followed_series_details[series_title_slug]['volumes']:
+                    book_id = volume['id']
+                    if book_id not in self.downloaded_book_ids and book_id not in self.preordered_books:
+                        series_has_new_volumes = True
+                if not series_has_new_volumes:
+                    print('%s is fully owned and completed. Series will not be followed anymore.'
+                          % self.followed_series_details[series_title_slug]['title'])
+                    self.series_follow_states[series_title_slug] = False
 
     def write_owned_series_file(self):
         with open(self.owned_series_file, mode='w', newline='') as f:
