@@ -306,8 +306,9 @@ class JNCDataHandler:
                 )
                 new_books_ordered = True
         if new_books_ordered:
-            # refresh owned books list
+            # refresh data
             self.load_owned_books()
+            self.load_preordered_books()
 
     def unfollow_complete_series(self):
         for series_title_slug in self.followed_series_details:
