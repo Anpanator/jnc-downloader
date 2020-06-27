@@ -282,7 +282,7 @@ class JNCDataHandler:
                 self.jnclient.buy_credits(purchase_batch)
                 print('Successfully bought %i premium credits. ' % purchase_batch)
                 credits_to_buy -= purchase_batch
-                print('%i premium credits left to buy.\n' % credits_to_buy)
+                print('%i premium credits left to buy.' % credits_to_buy)
             else:
                 # abort when user does not confirm
                 break

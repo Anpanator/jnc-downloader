@@ -106,8 +106,8 @@ if enable_order_books:
             'If you do not buy all credits at once, you will be asked to buy credits for each volume once you run out'
         )
         handler.buy_credits(unowned_books_amount - jnclient.available_credits)
-    else:
-        buy_individual_credits = True if enable_buy_credits else False
+
+    buy_individual_credits = True if enable_buy_credits else False
     handler.order_unowned_books(buy_individual_credits)
 
 handler.print_preorders()
