@@ -342,7 +342,7 @@ class JNCDataHandler:
         if len(self.preordered_books):
             print('\nCurrent preorders (Release Date / Title):')
         for book_id in self.preordered_books:
-            print('%s \t %s' % (self.preordered_books[book_id]['time'], self.preordered_books[book_id]['title']))
+            print('%s  %s' % (self.preordered_books[book_id]['time'], self.preordered_books[book_id]['title']))
 
     def __ensure_files_exist(self):
         if not os.path.isfile(self.owned_series_file):
