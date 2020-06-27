@@ -94,13 +94,17 @@ handler.print_new_volumes()
 unowned_books_amount = len(handler.unowned_books)
 if enable_order_books:
     buy_individual_credits = False
-    if enable_buy_credits and unowned_books_amount > 0:
+    print(
+        '\nTo buy all books, you will need %i premium credits, you have %i' %
+        (unowned_books_amount, jnclient.available_credits)
+    )
+    if jnclient.available_credits >= unowned_books_amount > 0:
+        # No need to buy credits
+        handler.order_unowned_books(False)
+    elif enable_buy_credits and unowned_books_amount > 0:
         print(
-            '\nTo buy all books, you will need %i premium credits, you have %i' %
-            (unowned_books_amount, jnclient.available_credits)
+            'If you do not buy all credits at once, you will be asked to buy credits for each volume once you run out'
         )
-        print(
-            'If you do not buy all credits at once, you will be asked to buy credits for each volume once you run out')
         handler.buy_credits(unowned_books_amount - jnclient.available_credits)
     else:
         buy_individual_credits = True if enable_buy_credits else False
