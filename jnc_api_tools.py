@@ -119,7 +119,7 @@ class JNClient:
 
     def get_premium_credit_price(self):
         """Determines the price of premium credits based on account status"""
-        if self.account_type == self.ACCOUNT_TYPE_PREMIUM:
+        if self.ACCOUNT_TYPE_PREMIUM in self.account_type:
             return 6
         else:
             return 7
