@@ -98,7 +98,7 @@ class JNClient:
 
     def buy_credits(self, amount):
         """Buy premium credits on JNC. Max. amount: 10. Price depends on membership status."""
-        if type(amount) is not int or (amount > 10) or (amount <= 0):
+        if (type(amount) is not int) or (amount > 10) or (amount <= 0):
             raise ArgumentError('It is not possible to buy less than 1 or more than 10 credits.')
 
         response = requests.post(
@@ -119,7 +119,7 @@ class JNClient:
 
     def get_premium_credit_price(self):
         """Determines the price of premium credits based on account status"""
-        if self.account_type == self.ACCOUNT_TYPE_PREMIUM:
+        if self.ACCOUNT_TYPE_PREMIUM in self.account_type:
             return 6
         else:
             return 7
@@ -160,12 +160,12 @@ class JNCDataHandler:
         self.downloaded_book_ids = None
         self.downloaded_books = {}
         self.preordered_books = {}
-        self.unowned_books = None
+        self.orderable_books = None
         self.no_confirm_series = no_confirm_series
         self.no_confirm_credits = no_confirm_credits
         self.no_confirm_order = no_confirm_order
 
-        self.cur_time = datetime.now(timezone.utc).isoformat()[:23] + 'Z'
+        self.cur_time = datetime.now(timezone.utc)
 
         self.download_target_dir = os.path.expanduser(download_dir)
         self.downloaded_books_list_file = os.path.expanduser(owned_books_csv_path)
@@ -233,22 +233,24 @@ class JNCDataHandler:
             if self.series_follow_states[series_title_slug]:
                 self.followed_series_details[series_title_slug] = self.jnclient.get_series_info(series_title_slug)
 
-    def load_unowned_books(self):
-        self.unowned_books = {}
+    def load_orderable_books(self):
+        self.orderable_books = {}
         """Check for new volumes in followed series"""
         for title_slug in self.followed_series_details:
             for volume in self.followed_series_details[title_slug]['volumes']:
                 # Check if the volume is not yet owned
-                if not any(d['id'] == volume['id'] for d in self.owned_books):
-                    self.unowned_books[volume['id']] = {'titleslug': volume['titleslug'], 'title': volume['title']}
+                if not (any(d['id'] == volume['id'] for d in self.owned_books)) \
+                        and volume['id'] not in self.preordered_books:
+                    self.orderable_books[volume['id']] = {'titleslug': volume['titleslug'], 'title': volume['title']}
 
     def load_preordered_books(self):
         for book in self.owned_books:
             book_id = book['id']
-            book_time = book['publishingDate']
+            book_time = book['publishingDate']  # Format: 2020-07-12T05:00:00.000Z
             book_title = book['title']
 
-            if book_time > self.cur_time:
+            book_release_datetime = datetime.fromisoformat(book_time.rstrip('Z')).replace(tzinfo=timezone.utc)
+            if book_release_datetime > self.cur_time:
                 self.preordered_books[book_id] = {'title': book_title, 'id': book_id, 'time': book_time}
 
     def download_new_books(self):
@@ -291,18 +293,18 @@ class JNCDataHandler:
     def order_unowned_books(self, buy_individual_credits):
         print('\nOrdering unowned volumes of followed series:')
         new_books_ordered = False
-        for book_id in self.unowned_books:
-            print('Order book %s' % self.unowned_books[book_id]['title'])
+        for book_id in self.orderable_books:
+            print('Order book %s' % self.orderable_books[book_id]['title'])
             if self.no_confirm_order or self.user_confirm('Do you want to order?'):
                 if (self.jnclient.available_credits == 0) and buy_individual_credits:
                     self.buy_credits(1)
                 if self.jnclient.available_credits == 0:
                     print('No premium credits left. Stop order process.')
                     break
-                self.jnclient.order_book(self.unowned_books[book_id]['titleslug'])
+                self.jnclient.order_book(self.orderable_books[book_id]['titleslug'])
                 print(
                     'Ordered %s! Remaining credits: %i\n'
-                    % (self.unowned_books[book_id]['title'], self.jnclient.available_credits)
+                    % (self.orderable_books[book_id]['title'], self.jnclient.available_credits)
                 )
                 new_books_ordered = True
         if new_books_ordered:
@@ -316,7 +318,7 @@ class JNCDataHandler:
             if 'fully translated' in self.followed_series_details[series_title_slug]['tags']:
                 for volume in self.followed_series_details[series_title_slug]['volumes']:
                     book_id = volume['id']
-                    if book_id not in self.downloaded_book_ids and book_id not in self.preordered_books:
+                    if (book_id not in self.downloaded_book_ids) and (book_id not in self.preordered_books):
                         series_has_new_volumes = True
                 if not series_has_new_volumes:
                     print('%s is fully owned and completed. Series will not be followed anymore.'
@@ -334,10 +336,10 @@ class JNCDataHandler:
             csv_writer.writerows(self.downloaded_books.items())
 
     def print_new_volumes(self):
-        if len(self.unowned_books) > 0:
+        if len(self.orderable_books) > 0:
             print('\nThe following new books of series you follow can be ordered:')
-        for book_id in self.unowned_books:
-            print(self.unowned_books[book_id]['title'])
+        for book_id in self.orderable_books:
+            print(self.orderable_books[book_id]['title'])
 
     def print_preorders(self):
         if len(self.preordered_books):
