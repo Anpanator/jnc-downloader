@@ -92,12 +92,12 @@ handler.handle_new_series()
 handler.print_new_volumes()
 
 unowned_books_amount = len(handler.orderable_books)
-if enable_order_books:
+if enable_order_books and unowned_books_amount > 0:
     print(
         '\nTo buy all books, you will need %i premium credits, you have %i' %
         (unowned_books_amount, jnclient.available_credits)
     )
-    if (jnclient.available_credits < unowned_books_amount > 0) and enable_buy_credits:
+    if (jnclient.available_credits < unowned_books_amount) and enable_buy_credits:
         print(
             'If you do not buy all credits at once, you will be asked to buy credits for each volume once you run out'
         )
