@@ -1,0 +1,12 @@
+= How to contribute
+
+In general, contributions are very much appreciated. Just open a PR with your changes.
+
+However, please follow the following guidelines:
+
+* Keep the Pull Request small: Open one PR per feature or bug fix. +
+This is to make reviews easier and keep the potential for bugs down. 
+It is completely fine to have multiple open pull requests.
+
+* A pull request should always go to the `experimental` branch first. 
+This branch will be merged to the `master` branch once it is deemed there was enough testing.
