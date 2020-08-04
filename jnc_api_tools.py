@@ -29,7 +29,10 @@ class JNClient:
         self.user_id = login_response['user']['id']
         self.user_name = login_response['user']['username']
         self.available_credits = login_response['user']['earnedCredits'] - login_response['user']['usedCredits']
-        self.account_type = login_response['user']['currentSubscription']['plan']['id']
+
+        subscription = login_response['user']['currentSubscription']
+
+        self.account_type = subscription['plan']['id'] if 'plan' in subscription else None
 
     def get_owned_books(self):
         """Requests the list of owned books from JNC.
@@ -119,7 +122,9 @@ class JNClient:
 
     def get_premium_credit_price(self):
         """Determines the price of premium credits based on account status"""
-        if self.ACCOUNT_TYPE_PREMIUM in self.account_type:
+        if self.account_type is None:
+            return None
+        elif self.ACCOUNT_TYPE_PREMIUM in self.account_type:
             return 6
         else:
             return 7
@@ -275,6 +280,11 @@ class JNCDataHandler:
     def buy_credits(self, credits_to_buy):
         print('\nAttempting to buy %i credits.' % credits_to_buy)
         unit_price = self.jnclient.get_premium_credit_price()
+
+        if unit_price is None:
+            print('Inactive subscription, cannot buy credits')
+            return
+
         print('Each premium credit will cost US$%i' % unit_price)
         while credits_to_buy > 0:
             purchase_batch = 10 if credits_to_buy > 10 else credits_to_buy
