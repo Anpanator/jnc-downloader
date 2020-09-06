@@ -185,7 +185,9 @@ class JNCDataHandler:
 
         self.owned_books = sorted(
             owned_books,
-            key=lambda book: (book['serie']['titleslug'], book['volumeNumber']))
+            key=lambda book: (book.get('serie', {}).get('titleslug', ''), book['volumeNumber']))
+
+
 
     def load_owned_series(self):
         self.owned_series = set()
