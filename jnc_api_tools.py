@@ -1,6 +1,6 @@
 import csv
-from datetime import datetime, timezone
 import os
+from datetime import datetime, timezone
 
 import requests
 
@@ -187,17 +187,15 @@ class JNCDataHandler:
             owned_books,
             key=lambda book: (book.get('serie', {}).get('titleslug', ''), book['volumeNumber']))
 
-
-
     def load_owned_series(self):
         self.owned_series = set()
         for book in self.owned_books:
-            self.owned_series.add(book['serie']['titleslug'])
+            self.owned_series.add(book.get('serie', {}).get('titleslug', ''))
 
     def handle_new_series(self):
         """"Ask the user if he wants to follow a new series he owns"""
         for series_title_slug in self.owned_series:
-            if series_title_slug not in self.series_follow_states:
+            if series_title_slug not in self.series_follow_states and len(series_title_slug) > 0:
                 self.series_follow_states[series_title_slug] = self.no_confirm_series or self.user_confirm(
                     '%s is a new series. Do you want to follow it?' % series_title_slug
                 )
