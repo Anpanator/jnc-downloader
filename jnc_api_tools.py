@@ -164,9 +164,7 @@ class JNCDataHandler:
                 if self.jnclient.available_credits == 0:
                     print('No premium credits left. Stop order process.')
                     break
-                # ---------------------------------------
-                self.jnclient.order_book_new(book_id)
-                # self.jnclient.order_book(self.orderable_books[book_id]['titleslug'])
+                self.jnclient.order_book(book_id)
                 print(
                     'Ordered %s! Remaining credits: %i\n'
                     % (self.orderable_books[book_id]['title'], self.jnclient.available_credits)
@@ -279,7 +277,6 @@ class JNClient:
     SERIES_INFO_URL = BASE_URL + '/series/findOne'
     API_USER_URL_PATTERN = BASE_URL + '/users/%s/'  # %s is the user id
     DOWNLOAD_BOOK_URL_PATTERN = BASE_URL + '/volumes/%s/getpremiumebook'  # %s is the book id
-    ORDER_URL_PATTERN = BASE_URL + '/users/%s/redeemcredit'  # %s is user id
     ORDER_URL_PATTERN_NEW = 'https://labs.j-novel.club/app/v1/me/redeem/%s'  # %s book id
     BUY_CREDITS_URL_PATTERN = BASE_URL + '/users/%s/purchasecredit'  # %s is user id
 
@@ -310,32 +307,7 @@ class JNClient:
             headers={'Authorization': self.auth_token}
         ).json()['ownedBooks']
 
-    def order_book(self, book_title_slug):
-        """Order book on JNC side, i.e. redeem premium credit
-
-        Notable non-success responses:
-            422 = book already ordered
-
-        :param book_title_slug the full title slug of the book,
-                               e.g. an-archdemon-s-dilemma-how-to-love-your-elf-bride-volume-9
-        """
-        if self.available_credits <= 0:
-            raise NoCreditsError('No credits available to order book!')
-
-        response = requests.post(
-            self.ORDER_URL_PATTERN % self.user_id,
-            json={'titleslug': book_title_slug},
-            headers={'Authorization': self.auth_token}
-        )
-
-        if response.status_code == 422:
-            raise JNCApiError('Book already ordered')
-
-        if not response.ok:
-            raise JNCApiError('Error when ordering book')
-        self.available_credits -= 1
-
-    def order_book_new(self, book_id: str):
+    def order_book(self, book_id: str):
         """Order book on JNC side, i.e. redeem premium credit
 
         Notable responses:
