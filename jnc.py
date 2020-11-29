@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 from __future__ import print_function
-from argparse import ArgumentParser
 
 import sys
+from argparse import ArgumentParser
+
 from jnc_api_tools import JNClient, JNCApiError, JNCDataHandler
+
+MIN_PYTHON = (3, 7)
+assert sys.version_info >= MIN_PYTHON, f"requires Python {'.'.join([str(n) for n in MIN_PYTHON])} or newer"
 
 # Config: START
 login_email = 'user'

@@ -1,157 +1,9 @@
 import csv
 import os
 from datetime import datetime, timezone
+from typing import Dict, List
 
 import requests
-
-
-class JNClient:
-    """Everything you need to talk to the JNC API"""
-
-    BASE_URL = 'https://api.j-novel.club/api'
-    LOGIN_URL = BASE_URL + '/users/login?include=user'
-    LOGOUT_URL = BASE_URL + '/users/logout'
-    SERIES_INFO_URL = BASE_URL + '/series/findOne'
-    API_USER_URL_PATTERN = BASE_URL + '/users/%s/'  # %s is the user id
-    DOWNLOAD_BOOK_URL_PATTERN = BASE_URL + '/volumes/%s/getpremiumebook'  # %s is the book id
-    ORDER_URL_PATTERN = BASE_URL + '/users/%s/redeemcredit'  # %s is user id
-    BUY_CREDITS_URL_PATTERN = BASE_URL + '/users/%s/purchasecredit'  # %s is user id
-
-    ACCOUNT_TYPE_PREMIUM = 'PremiumMembership'
-
-    def __init__(self, login_email, login_password):
-        login_response = self.__login(login_email, login_password)
-
-        if 'error' in login_response:
-            raise JNCApiError('Login failed!')
-
-        self.auth_token = login_response['id']
-        self.user_id = login_response['user']['id']
-        self.user_name = login_response['user']['username']
-        self.available_credits = login_response['user']['earnedCredits'] - login_response['user']['usedCredits']
-
-        subscription = login_response['user']['currentSubscription']
-
-        self.account_type = subscription['plan']['id'] if 'plan' in subscription else None
-
-    def get_owned_books(self):
-        """Requests the list of owned books from JNC.
-
-        :return dict with information on the owned books (ids, titles, etc.)"""
-        return requests.get(
-            self.API_USER_URL_PATTERN % self.user_id,
-            params={'filter': '{"include":[{"ownedBooks":"serie"}]}'},
-            headers={'Authorization': self.auth_token}
-        ).json()['ownedBooks']
-
-    def order_book(self, book_title_slug):
-        """Order book on JNC side, i.e. redeem premium credit
-
-        Notable non-success responses:
-            422 = book already ordered
-
-        :param book_title_slug the full title slug of the book,
-                               e.g. an-archdemon-s-dilemma-how-to-love-your-elf-bride-volume-9
-        """
-        if self.available_credits <= 0:
-            raise NoCreditsError('No credits available to order book!')
-
-        response = requests.post(
-            self.ORDER_URL_PATTERN % self.user_id,
-            json={'titleslug': book_title_slug},
-            headers={'Authorization': self.auth_token}
-        )
-
-        if response.status_code == 422:
-            raise JNCApiError('Book already ordered')
-
-        if not response.ok:
-            raise JNCApiError('Error when ordering book')
-        self.available_credits -= 1
-
-    def download_book(self, book_id):
-        """Will attempt to download a book from JNC
-        JNC does not respond with a standard 404 error when a book cannot be found (despite being marked as published)
-        and instead will do a redirect to an error page, which itself reports a http 200
-
-        :param book_id the id of the book.
-        :return The response content
-        :raise JNCApiError when the book is not available for download yet."""
-        r = requests.get(
-            self.DOWNLOAD_BOOK_URL_PATTERN % book_id,
-            params={
-                'userId': self.user_id,
-                'userName': self.user_name,
-                'access_token': self.auth_token
-            }, allow_redirects=False
-        )
-
-        if r.status_code != 200:
-            raise JNCApiError(str(r.status_code) + ': Book not available.')
-
-        return r.content
-
-    def get_series_info(self, series_title_slug):
-        """Fetch information about a series from JNC, including the volumes of the series"""
-        filter_string = '{"where":{"titleslug":"%s"},"include":["volumes"]}' % series_title_slug
-        return requests.get(
-            self.SERIES_INFO_URL,
-            params={'filter': filter_string}
-        ).json()
-
-    def buy_credits(self, amount):
-        """Buy premium credits on JNC. Max. amount: 10. Price depends on membership status."""
-        if (type(amount) is not int) or (amount > 10) or (amount <= 0):
-            raise ArgumentError('It is not possible to buy less than 1 or more than 10 credits.')
-
-        response = requests.post(
-            self.BUY_CREDITS_URL_PATTERN % self.user_id,
-            headers={
-                'Accept': 'application/json',
-                'content-type': 'application/json',
-                'Authorization': self.auth_token
-            },
-            json={'number': amount},
-            allow_redirects=False
-        )
-
-        if not response.status_code < 300:
-            raise JNCApiError('Could not purchase credits!')
-
-        self.available_credits += amount
-
-    def get_premium_credit_price(self):
-        """Determines the price of premium credits based on account status"""
-        if self.account_type is None:
-            return None
-        elif self.ACCOUNT_TYPE_PREMIUM in self.account_type:
-            return 6
-        else:
-            return 7
-
-    def __login(self, login_email, password):
-        """Sends a login request to JNC. This method will not work if the user uses SSO (Google, Facebook)"""
-        return requests.post(
-            self.LOGIN_URL,
-            headers={'Accept': 'application/json', 'content-type': 'application/json'},
-            json={'email': login_email, 'password': password}
-        ).json()
-
-    def __logout(self):
-        """Does a logout request to JNC to invalidate the access token. Intended to be called automatically when the
-        class instance is garbage collected."""
-        requests.post(
-            self.LOGOUT_URL,
-            headers={'Authorization': self.auth_token}
-        )
-        print('Logged out')
-
-    def __del__(self):
-        try:
-            if len(self.auth_token) > 0:
-                self.__logout()
-        except AttributeError:
-            pass
 
 
 class JNCDataHandler:
@@ -196,7 +48,7 @@ class JNCDataHandler:
         """"Ask the user if he wants to follow a new series he owns"""
         for series_title_slug in self.owned_series:
             if series_title_slug not in self.series_follow_states and len(series_title_slug) > 0:
-                self.series_follow_states[series_title_slug] = self.no_confirm_series or self.user_confirm(
+                self.series_follow_states[series_title_slug] = self.no_confirm_series or JNCUtils.user_confirm(
                     '%s is a new series. Do you want to follow it?' % series_title_slug
                 )
 
@@ -290,7 +142,8 @@ class JNCDataHandler:
             purchase_batch = 10 if credits_to_buy > 10 else credits_to_buy
             price = purchase_batch * unit_price
             if self.no_confirm_credits \
-                    or self.user_confirm('Do you want to buy %i premium credits for US$%i?' % (purchase_batch, price)):
+                    or JNCUtils.user_confirm(
+                'Do you want to buy %i premium credits for US$%i?' % (purchase_batch, price)):
                 self.jnclient.buy_credits(purchase_batch)
                 print('Successfully bought %i premium credits. ' % purchase_batch)
                 credits_to_buy -= purchase_batch
@@ -305,13 +158,15 @@ class JNCDataHandler:
         new_books_ordered = False
         for book_id in self.orderable_books:
             print('Order book %s' % self.orderable_books[book_id]['title'])
-            if self.no_confirm_order or self.user_confirm('Do you want to order?'):
+            if self.no_confirm_order or JNCUtils.user_confirm('Do you want to order?'):
                 if (self.jnclient.available_credits == 0) and buy_individual_credits:
                     self.buy_credits(1)
                 if self.jnclient.available_credits == 0:
                     print('No premium credits left. Stop order process.')
                     break
-                self.jnclient.order_book(self.orderable_books[book_id]['titleslug'])
+                # ---------------------------------------
+                self.jnclient.order_book_new(book_id)
+                # self.jnclient.order_book(self.orderable_books[book_id]['titleslug'])
                 print(
                     'Ordered %s! Remaining credits: %i\n'
                     % (self.orderable_books[book_id]['title'], self.jnclient.available_credits)
@@ -363,18 +218,47 @@ class JNCDataHandler:
         if not os.path.isfile(self.downloaded_books_list_file):
             open(self.downloaded_books_list_file, 'a').close()
 
+
+class JNCBook:
+    book_id: str
+    title: str
+    title_slug: str
+    volume_num: int
+    series_id: str
+    series_slug: str
+    release_date: datetime
+
+    def __init__(self, book_id: str, title: str, title_slug: str, volume_num: int, series_id: str, series_slug: str,
+                 date_string_iso: str):
+        self.release_date = datetime.fromisoformat(date_string_iso.rstrip('Z')).replace(tzinfo=timezone.utc)
+        self.series_slug = series_slug
+        self.series_id = series_id
+        self.volume_num = volume_num
+        self.title_slug = title_slug
+        self.title = title
+        self.book_id = book_id
+
+
+class JNCUtils:
     @staticmethod
-    def user_confirm(message):
+    def user_confirm(message: str):
         answer = input(message + ' (y/n)')
         return True if answer == 'y' else False
 
+    @staticmethod
+    def sort_books(books: List[JNCBook]) -> List[JNCBook]:
+        """Sorts List of JNCBooks by their series and volume number and returns result"""
+        return sorted(
+            books,
+            key=lambda book: (book.series_slug, book.volume_num)
+        )
 
-class JNCBook:
-    pass
+#    @staticmethod
+#    def build_jnc_book_from_api_response(api_response: dict):
+#        return JNCBook()
 
 
 class JNCApiError(Exception):
-    """Exception for JNC API errors"""
     pass
 
 
@@ -384,3 +268,183 @@ class NoCreditsError(Exception):
 
 class ArgumentError(Exception):
     pass
+
+
+class JNClient:
+    """Everything you need to talk to the JNC API"""
+
+    BASE_URL = 'https://api.j-novel.club/api'
+    LOGIN_URL = BASE_URL + '/users/login?include=user'
+    LOGOUT_URL = BASE_URL + '/users/logout'
+    SERIES_INFO_URL = BASE_URL + '/series/findOne'
+    API_USER_URL_PATTERN = BASE_URL + '/users/%s/'  # %s is the user id
+    DOWNLOAD_BOOK_URL_PATTERN = BASE_URL + '/volumes/%s/getpremiumebook'  # %s is the book id
+    ORDER_URL_PATTERN = BASE_URL + '/users/%s/redeemcredit'  # %s is user id
+    ORDER_URL_PATTERN_NEW = 'https://labs.j-novel.club/app/v1/me/redeem/%s'  # %s book id
+    BUY_CREDITS_URL_PATTERN = BASE_URL + '/users/%s/purchasecredit'  # %s is user id
+
+    ACCOUNT_TYPE_PREMIUM = 'PremiumMembership'
+
+    def __init__(self, login_email, login_password):
+        login_response = self.__login(login_email, login_password)
+
+        if 'error' in login_response:
+            raise JNCApiError('Login failed!')
+
+        self.auth_token = login_response['id']
+        self.user_id = login_response['user']['id']
+        self.user_name = login_response['user']['username']
+        self.available_credits = login_response['user']['earnedCredits'] - login_response['user']['usedCredits']
+
+        subscription = login_response['user']['currentSubscription']
+
+        self.account_type = subscription['plan']['id'] if 'plan' in subscription else None
+
+    def get_owned_books(self):
+        """Requests the list of owned books from JNC.
+
+        :return dict with information on the owned books (ids, titles, etc.)"""
+        return requests.get(
+            self.API_USER_URL_PATTERN % self.user_id,
+            params={'filter': '{"include":[{"ownedBooks":"serie"}]}'},
+            headers={'Authorization': self.auth_token}
+        ).json()['ownedBooks']
+
+    def order_book(self, book_title_slug):
+        """Order book on JNC side, i.e. redeem premium credit
+
+        Notable non-success responses:
+            422 = book already ordered
+
+        :param book_title_slug the full title slug of the book,
+                               e.g. an-archdemon-s-dilemma-how-to-love-your-elf-bride-volume-9
+        """
+        if self.available_credits <= 0:
+            raise NoCreditsError('No credits available to order book!')
+
+        response = requests.post(
+            self.ORDER_URL_PATTERN % self.user_id,
+            json={'titleslug': book_title_slug},
+            headers={'Authorization': self.auth_token}
+        )
+
+        if response.status_code == 422:
+            raise JNCApiError('Book already ordered')
+
+        if not response.ok:
+            raise JNCApiError('Error when ordering book')
+        self.available_credits -= 1
+
+    def order_book_new(self, book_id: str):
+        """Order book on JNC side, i.e. redeem premium credit
+
+        Notable responses:
+            204: Success
+            401: Unauthorized
+            410: Session token expired
+            404: Volume not found
+            501: Can't buy manga at this time
+            402: No credits left to redeem
+            409: Already own this volume
+            500: Internal server error (reported to us)
+            Other: Unknown server error
+        """
+        if self.available_credits <= 0:
+            raise NoCreditsError('No credits available to order book!')
+
+        response = requests.post(
+            self.ORDER_URL_PATTERN_NEW % book_id,
+            headers={'Authorization': f'Bearer {self.auth_token}'}
+        )
+
+        if response.status_code == 409:
+            raise JNCApiError('Book already ordered')
+
+        if not response.ok:
+            raise JNCApiError(f'Error when ordering book. Response was: {response.status_code}')
+
+        self.available_credits -= 1
+
+    def download_book(self, book_id):
+        """Will attempt to download a book from JNC
+        JNC does not respond with a standard 404 error when a book cannot be found (despite being marked as published)
+        and instead will do a redirect to an error page, which itself reports a http 200
+
+        :param book_id the id of the book.
+        :return The response content
+        :raise JNCApiError when the book is not available for download yet."""
+        r = requests.get(
+            self.DOWNLOAD_BOOK_URL_PATTERN % book_id,
+            params={
+                'userId': self.user_id,
+                'userName': self.user_name,
+                'access_token': self.auth_token
+            }, allow_redirects=False
+        )
+
+        if r.status_code != 200:
+            raise JNCApiError(str(r.status_code) + ': Book not available.')
+
+        return r.content
+
+    def get_series_info(self, series_title_slug):
+        """Fetch information about a series from JNC, including the volumes of the series"""
+        filter_string = '{"where":{"titleslug":"%s"},"include":["volumes"]}' % series_title_slug
+        return requests.get(
+            self.SERIES_INFO_URL,
+            params={'filter': filter_string}
+        ).json()
+
+    def buy_credits(self, amount):
+        """Buy premium credits on JNC. Max. amount: 10. Price depends on membership status."""
+        if (type(amount) is not int) or (amount > 10) or (amount <= 0):
+            raise ArgumentError('It is not possible to buy less than 1 or more than 10 credits.')
+
+        response = requests.post(
+            self.BUY_CREDITS_URL_PATTERN % self.user_id,
+            headers={
+                'Accept': 'application/json',
+                'content-type': 'application/json',
+                'Authorization': self.auth_token
+            },
+            json={'number': amount},
+            allow_redirects=False
+        )
+
+        if not response.status_code < 300:
+            raise JNCApiError('Could not purchase credits!')
+
+        self.available_credits += amount
+
+    def get_premium_credit_price(self):
+        """Determines the price of premium credits based on account status"""
+        if self.account_type is None:
+            return None
+        elif self.ACCOUNT_TYPE_PREMIUM in self.account_type:
+            return 6
+        else:
+            return 7
+
+    def __login(self, login_email, password):
+        """Sends a login request to JNC. This method will not work if the user uses SSO (Google, Facebook)"""
+        return requests.post(
+            self.LOGIN_URL,
+            headers={'Accept': 'application/json', 'content-type': 'application/json'},
+            json={'email': login_email, 'password': password}
+        ).json()
+
+    def __logout(self):
+        """Does a logout request to JNC to invalidate the access token. Intended to be called automatically when the
+        class instance is garbage collected."""
+        requests.post(
+            self.LOGOUT_URL,
+            headers={'Authorization': self.auth_token}
+        )
+        print('Logged out')
+
+    def __del__(self):
+        try:
+            if len(self.auth_token) > 0:
+                self.__logout()
+        except AttributeError:
+            pass
