@@ -81,7 +81,6 @@ login_pw = None
 handler = JNCDataHandler(jnclient, owned_series_file, downloaded_books_list_file, download_target_dir,
                          no_confirm_series, no_confirm_credits, no_confirm_order)
 
-print('Available premium credits: %i' % jnclient.available_credits)
 handler.read_owned_series_file()
 handler.read_downloaded_books_file()
 
@@ -96,11 +95,13 @@ handler.handle_new_series()
 handler.print_new_volumes()
 
 unowned_books_amount = len(handler.orderable_books)
+
+print(
+    '\nTo buy all books, you will need %i premium credits, you have %i' %
+    (unowned_books_amount, jnclient.available_credits)
+)
+
 if enable_order_books and unowned_books_amount > 0:
-    print(
-        '\nTo buy all books, you will need %i premium credits, you have %i' %
-        (unowned_books_amount, jnclient.available_credits)
-    )
     if (jnclient.available_credits < unowned_books_amount) and enable_buy_credits:
         print(
             'If you do not buy all credits at once, you will be asked to buy credits for each volume once you run out'
