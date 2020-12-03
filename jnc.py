@@ -7,7 +7,7 @@ from argparse import ArgumentParser
 from jnc_api_tools import JNClient, JNCApiError, JNCDataHandler
 
 MIN_PYTHON = (3, 7)
-assert sys.version_info >= MIN_PYTHON, f"requires Python {'.'.join([str(n) for n in MIN_PYTHON])} or newer"
+assert sys.version_info >= MIN_PYTHON, f'requires Python {".".join([str(n) for n in MIN_PYTHON])} or newer'
 
 # Config: START
 login_email = 'user'
@@ -81,25 +81,15 @@ login_pw = None
 handler = JNCDataHandler(jnclient, owned_series_file, downloaded_books_list_file, download_target_dir,
                          no_confirm_series, no_confirm_credits, no_confirm_order)
 
-handler.read_owned_series_file()
-handler.read_downloaded_books_file()
-
-handler.load_owned_books()
-handler.load_owned_series()
-handler.load_preordered_books()
-handler.load_followed_series_details()
-handler.load_orderable_books()
-
+print(f'Available premium credits: {jnclient.available_credits}')
 handler.handle_new_series()
-
 handler.print_new_volumes()
-
-unowned_books_amount = len(handler.orderable_books)
-
-print(
-    '\nTo buy all books, you will need %i premium credits, you have %i' %
-    (unowned_books_amount, jnclient.available_credits)
-)
+unowned_books_amount = len(handler.get_orderable_books())
+if unowned_books_amount > 0:
+    print(
+        f'\nTo buy all books, you will need {unowned_books_amount} premium credits, '
+        f'you have {jnclient.available_credits}'
+    )
 
 if enable_order_books and unowned_books_amount > 0:
     if (jnclient.available_credits < unowned_books_amount) and enable_buy_credits:
