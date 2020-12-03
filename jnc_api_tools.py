@@ -248,8 +248,9 @@ class JNCDataHandler:
         for series in self.owned_series.values():
             if series.followed is None:
                 series.followed = self.no_confirm_series or JNCUtils.user_confirm(
-                    f'{series.title} is a new series. Do you want to follow it?'
+                    f'{series.title or series.title_slug} is a new series. Do you want to follow it?'
                 )
+        self.load_followed_series_details()
 
     def read_owned_series_file(self) -> Dict[str, JNCSeries]:
         """Returns dictionary with series with the series title slug as key"""
@@ -280,20 +281,16 @@ class JNCDataHandler:
 
     def load_followed_series_details(self) -> None:
         known_series = self.read_owned_series_file()
-
-        for series_slug, cur_known_series in known_series.items():
-            cur_owned_series = None
-            for owned_series in self.owned_series.values():
+        for owned_series in self.owned_series.values():
+            for series_slug, cur_known_series in known_series.items():
                 if owned_series.title_slug == series_slug:
-                    cur_owned_series = owned_series
-                    cur_owned_series.followed = cur_known_series.followed
+                    owned_series.followed = cur_known_series.followed
 
-            if cur_owned_series is None \
-                    or cur_known_series.followed is False \
-                    or cur_known_series.is_detailed is True:
+            if not owned_series.followed \
+                    or owned_series.is_detailed is True:
                 continue
 
-            series_details = self.jnclient.get_series_info(series_slug)
+            series_details = self.jnclient.get_series_info(owned_series.title_slug)
             series_id = series_details['id']
             self.owned_series[series_id].title = series_details['title']
             self.owned_series[series_id].tags = series_details['tags']
@@ -382,18 +379,20 @@ class JNCDataHandler:
         if new_books_ordered:
             # refresh data
             self.load_owned_books()
+            self.load_owned_series()
+            self.handle_new_series()
 
     def unfollow_complete_series(self) -> None:
+        owned_book_ids = self.owned_books.keys()
         for series in self.owned_series.values():
-            if not series.followed or 'fully translated' not in series.tags:
+            if not series.followed or (series.is_detailed and 'fully translated' not in series.tags):
                 continue
+            series_volume_ids = set([volume.book_id for volume in series.volumes.values()])
 
-            for volume in series.volumes.values():
-                if (volume.book_id in self.downloaded_book_ids) \
-                        and not any(volume.book_id == preorder.book_id for preorder in self.get_preorders()):
-                    print(f'{series.title} is fully owned and completed. Series will not be followed anymore.')
-                    series.followed = False
-                    continue
+            if series_volume_ids.issubset(owned_book_ids):
+                print(f'{series.title} is fully owned and completed. Series will not be followed anymore.')
+                series.followed = False
+                continue
 
     def write_owned_series_file(self) -> None:
         follow_states = {}
