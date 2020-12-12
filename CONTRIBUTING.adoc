@@ -2,11 +2,19 @@
 
 In general, contributions are very much appreciated. Just open a PR with your changes.
 
-However, please follow the following guidelines:
+== PR Guideline
 
-* Keep the Pull Request small: Open one PR per feature or bug fix. +
+Keep the Pull Request as small as you can: Open one PR per feature or bug fix.
 This is to make reviews easier and keep the potential for bugs down. 
 It is completely fine to have multiple open pull requests.
 
-* A pull request should always go to the `experimental` branch first. 
+A pull request always needs to go to the `experimental` branch first. 
 This branch will be merged to the `master` branch once it is deemed there was enough testing.
+This is to allow users to make a clear distinction between a stable release and "bleeding edge" features.
+
+== Code
+
+Use PEP 8 code style.
+
+Use type hinting in all class properties and function signatures, including return types.
+Type hinting is encouraged for variables where the data structure is complex or not obvious.
