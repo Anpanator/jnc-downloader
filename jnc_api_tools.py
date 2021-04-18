@@ -77,8 +77,6 @@ class JNClient:
 
     def download_book(self, book_id: str) -> bytes:
         """Will attempt to download a book from JNC
-        JNC does not respond with a standard 404 error when a book cannot be found (despite being marked as published)
-        and instead will do a redirect to an error page, which itself reports a http 200
 
         :param book_id the id of the book.
         :return The response content
@@ -89,7 +87,7 @@ class JNClient:
                 'userId': self.user_id,
                 'userName': self.user_name,
                 'access_token': self.auth_token
-            }, allow_redirects=False
+            }
         )
 
         if r.status_code != 200:
@@ -100,10 +98,11 @@ class JNClient:
     def get_series_info(self, series_title_slug: str) -> dict:
         """Fetch information about a series from JNC, including the volumes of the series"""
         filter_string = '{"where":{"titleslug":"%s"},"include":["volumes"]}' % series_title_slug
-        return requests.get(
+        r = requests.get(
             self.SERIES_INFO_URL,
             params={'filter': filter_string}
-        ).json()
+        )
+        return r.json()
 
     def buy_credits(self, amount: int) -> None:
         """Buy premium credits on JNC. Max. amount: 10. Price depends on membership status."""
