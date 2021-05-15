@@ -74,11 +74,32 @@ class JNClient:
         return JNClient.create_jnc_user_data(login_response['id'], login_response['user'])
 
     @staticmethod
+    def fetch_user_data(auth_token: str) -> JNCUserData:
+        """
+        Get user data with existing auth token.
+        :raises JNCUnauthorizedError when the token is expired. Use login() instead in this case
+        """
+        user_response = requests.get(
+            JNClient.FETCH_USER_URL,
+            headers={
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'Authorization': auth_token
+            }
+        )
+        if user_response.status_code == 401:
+            raise JNCUnauthorizedError
+        if not user_response.status_code < 300:
+            raise JNCApiError('Could not fetch user data!')
+
+        return JNClient.create_jnc_user_data(auth_token, user_response.json())
+
+    @staticmethod
     def create_jnc_user_data(auth_token: str, user_data: dict) -> JNCUserData:
         subscription = user_data['currentSubscription']
         return JNCUserData(
             user_id=user_data['id'],
-            user_name=user_data['name'],
+            user_name=user_data['username'],
             auth_token=auth_token,
             premium_credits=user_data['earnedCredits'] - user_data['usedCredits'],
             account_type=subscription['plan']['id'] if 'plan' in subscription else None
@@ -86,19 +107,20 @@ class JNClient:
 
     @staticmethod
     def fetch_library(auth_token: str) -> Dict[str, JNCBook]:
-        response = requests.post(
+        response = requests.get(
             JNClient.FETCH_LIBRARY_URL,
             headers={
                 'Accept': 'application/json',
                 'Content-Type': 'application/json',
                 'Authorization': f'Bearer {auth_token}'
             }
-        ).json()
+        )
 
         if not response.status_code < 300:
             raise JNCApiError('Could not fetch library!')
         result = {}
-        for item in response['books']:
+        content = response.json()
+        for item in content['books']:
             download_link = None
             for link in item['downloads']:
                 download_link = link['link'] if link['type'] == 'EPUB' else None
@@ -191,6 +213,10 @@ class JNCUtils:
 
 
 class JNCApiError(Exception):
+    pass
+
+
+class JNCUnauthorizedError(JNCApiError):
     pass
 
 
