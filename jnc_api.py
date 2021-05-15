@@ -51,6 +51,7 @@ class JNClient:
     """Everything you need to talk to the JNC API"""
 
     LOGIN_URL = 'https://api.j-novel.club/api/users/login?include=user'
+    FETCH_USER_URL = 'https://api.j-novel.club/api/users/me'  # ?filter={"include":[]}
     FETCH_LIBRARY_URL = 'https://labs.j-novel.club/app/v1/me/library?include=serie&format=json'
     BUY_CREDITS_URL = 'https://api.j-novel.club/api/users/me/purchasecredit'
 
@@ -70,12 +71,16 @@ class JNClient:
         if 'error' in login_response:
             raise JNCApiError('Login failed!')
 
-        subscription = login_response['user']['currentSubscription']
+        return JNClient.create_jnc_user_data(login_response['id'], login_response['user'])
+
+    @staticmethod
+    def create_jnc_user_data(auth_token: str, user_data: dict) -> JNCUserData:
+        subscription = user_data['currentSubscription']
         return JNCUserData(
-            user_id=login_response['user']['id'],
-            user_name=login_response['user']['name'],
-            auth_token=login_response['id'],
-            premium_credits=login_response['user']['earnedCredits'] - login_response['user']['usedCredits'],
+            user_id=user_data['id'],
+            user_name=user_data['name'],
+            auth_token=auth_token,
+            premium_credits=user_data['earnedCredits'] - user_data['usedCredits'],
             account_type=subscription['plan']['id'] if 'plan' in subscription else None
         )
 
@@ -96,7 +101,7 @@ class JNClient:
         for item in response['books']:
             download_link = None
             for link in item['downloads']:
-                download_link = link['link'] if link['type'] is 'EPUB' else None
+                download_link = link['link'] if link['type'] == 'EPUB' else None
                 if download_link is not None:
                     break
 
@@ -107,7 +112,7 @@ class JNClient:
                 title_slug=volume['slug'],
                 volume_num=volume['number'],
                 publish_date=volume['publishing'],
-                is_preorder=True if item['status'] is 'PREORDER' else False,
+                is_preorder=True if item['status'] == 'PREORDER' else False,
                 is_owned=volume['owned'],
                 series_id=item.get('serie', {}).get('legacyId', None),
                 series_slug=item.get('serie', {}).get('slug', None),
@@ -145,7 +150,7 @@ class JNCUtils:
     @staticmethod
     def user_confirm(message: str) -> bool:
         answer = input(message + ' (y/n)')
-        return True if answer is 'y' else False
+        return True if answer == 'y' else False
 
     @staticmethod
     def sort_books(books: Dict[str, JNCBook]) -> Dict[str, JNCBook]:
