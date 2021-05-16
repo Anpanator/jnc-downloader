@@ -1,7 +1,7 @@
 import csv
 import os
 from datetime import datetime, timezone
-from typing import Dict
+from typing import Dict, List, Set
 
 import requests
 
@@ -30,12 +30,15 @@ class JNCBook:
     is_preorder: bool
     series_slug: str = None
     publish_date: datetime
+    updated_date: datetime
     is_owned: bool
     download_link: str = None
 
     def __init__(self, book_id: str, title: str, title_slug: str, volume_num: int, series_id: str,
-                 publish_date: str, is_preorder: bool, series_slug: str, is_owned: bool, download_link: str):
-        self.publish_date = datetime.fromisoformat(publish_date.rstrip('Z')).replace(tzinfo=timezone.utc)
+                 publish_date: str, updated_date: str, is_preorder: bool, series_slug: str, is_owned: bool,
+                 download_link: str):
+        publish_date = publish_date.rstrip('Z').split('.')[0]
+        self.publish_date = datetime.fromisoformat(publish_date).replace(tzinfo=timezone.utc)
         self.series_id = series_id
         self.volume_num = volume_num
         self.title_slug = title_slug
@@ -45,6 +48,85 @@ class JNCBook:
         self.series_slug = series_slug
         self.is_owned = is_owned
         self.download_link = download_link
+        if updated_date is not None:
+            updated_date = updated_date.rstrip('Z').split('.')[0]
+            self.updated_date = datetime.fromisoformat(updated_date).replace(tzinfo=timezone.utc)
+
+
+class JNCUtils:
+    @staticmethod
+    def user_confirm(message: str) -> bool:
+        answer = input(message + ' (y/n)')
+        return True if answer == 'y' else False
+
+    @staticmethod
+    def sort_books(books: Dict[str, JNCBook]) -> Dict[str, JNCBook]:
+        """Sorts List of JNCBooks by their series slug and volume number and returns result"""
+        sorted_book_ids = sorted(
+            books,
+            key=lambda k: (books[k].series_slug or books[k].title_slug, books[k].volume_num)
+        )
+        return {book_id: books[book_id] for book_id in sorted_book_ids}
+
+    @staticmethod
+    def read_downloaded_books_file(csv_path: str) -> set:
+        """First column of the csv is expected to be the book id"""
+        with open(csv_path, mode='r', newline='') as f:
+            book_ids = set([row[0] for row in csv.reader(f, delimiter='\t')])
+        return book_ids
+
+    @staticmethod
+    def download_book(target_dir: str, book: JNCBook) -> None:
+
+        if book.download_link is None:
+            raise RuntimeError('Book does not have a download link.')
+
+        download_response = requests.get(book.download_link)
+
+        if download_response.status_code != 200:
+            raise JNCApiError(str(download_response.status_code) + ': Book not available.')
+
+        book_file_name = book.title_slug + '.epub'
+        book_file_path = os.path.join(target_dir, book_file_name)
+
+        with open(book_file_path, mode='wb') as f:
+            f.write(download_response.content)
+
+    @staticmethod
+    def filter_purchaseable_books(library: Dict[str, JNCBook]):
+        pass
+
+    """
+    @staticmethod
+    def check_new_series(library: Dict[str, JNCBook], owned_series: Dict[str, JNCSeries]) -> None:
+        pass
+    """
+
+    @staticmethod
+    def check_completed_series(library: Dict[str, JNCBook]) -> None:
+        pass
+
+    @staticmethod
+    def process_library(library: Dict[str, JNCBook], downloaded_book_dates: Dict[str, datetime], target_dir: str,
+                        include_updated: bool = False) -> None:
+        now = datetime.now(tz=timezone.utc).replace(microsecond=0)
+        for book_id, book in library.items():
+            if book.is_preorder is True \
+                    or book.publish_date > now \
+                    or book.download_link is None \
+                    or book_id in downloaded_book_dates and not include_updated:
+                continue
+
+            if book_id not in downloaded_book_dates \
+                    or (include_updated
+                        and book.updated_date is not None
+                        and downloaded_book_dates[book_id] < book.updated_date):
+                try:
+                    print(f'Downloading: {book.title}')
+                    # JNCUtils.download_book(target_dir=target_dir, book=book)
+                    # downloaded_book_dates[book_id] = now
+                except JNCApiError as err:
+                    print(err)
 
 
 class JNClient:
@@ -134,6 +216,7 @@ class JNClient:
                 title_slug=volume['slug'],
                 volume_num=volume['number'],
                 publish_date=volume['publishing'],
+                updated_date=item.get('lastUpdated', None),
                 is_preorder=True if item['status'] == 'PREORDER' else False,
                 is_owned=volume['owned'],
                 series_id=item.get('serie', {}).get('legacyId', None),
@@ -166,50 +249,6 @@ class JNClient:
 
         if not response.status_code < 300:
             raise JNCApiError('Could not purchase credits!')
-
-
-class JNCUtils:
-    @staticmethod
-    def user_confirm(message: str) -> bool:
-        answer = input(message + ' (y/n)')
-        return True if answer == 'y' else False
-
-    @staticmethod
-    def sort_books(books: Dict[str, JNCBook]) -> Dict[str, JNCBook]:
-        """Sorts List of JNCBooks by their series slug and volume number and returns result"""
-        sorted_book_ids = sorted(
-            books,
-            key=lambda k: (books[k].series_slug or books[k].title_slug, books[k].volume_num)
-        )
-        return {book_id: books[book_id] for book_id in sorted_book_ids}
-
-    @staticmethod
-    def read_downloaded_books_file(csv_path: str) -> set:
-        """First column of the csv is expected to be the book id"""
-        with open(csv_path, mode='r', newline='') as f:
-            book_ids = set([row[0] for row in csv.reader(f, delimiter='\t')])
-        return book_ids
-
-    @staticmethod
-    def download_book(target_dir: str, book: JNCBook) -> None:
-        try:
-            if book.download_link is None:
-                raise RuntimeError('Book does not have a download link.')
-
-            download_response = requests.get(book.download_link)
-
-            if download_response.status_code != 200:
-                raise JNCApiError(str(download_response.status_code) + ': Book not available.')
-
-            book_file_name = book.title_slug + '.epub'
-            book_file_path = os.path.join(target_dir, book_file_name)
-
-            with open(book_file_path, mode='wb') as f:
-                f.write(download_response.content)
-
-            book.is_owned = True
-        except JNCApiError as err:
-            print(err)
 
 
 class JNCApiError(Exception):
