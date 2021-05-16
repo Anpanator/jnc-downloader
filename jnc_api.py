@@ -30,12 +30,13 @@ class JNCBook:
     is_preorder: bool
     series_slug: str = None
     publish_date: datetime
-    updated_date: datetime
+    updated_date: datetime = None
+    purchase_date: datetime = None
     is_owned: bool
     download_link: str = None
 
     def __init__(self, book_id: str, title: str, title_slug: str, volume_num: int, series_id: str,
-                 publish_date: str, updated_date: str, is_preorder: bool, series_slug: str, is_owned: bool,
+                 publish_date: str, updated_date: str, purchase_date: str, is_preorder: bool, series_slug: str, is_owned: bool,
                  download_link: str):
         publish_date = publish_date.rstrip('Z').split('.')[0]
         self.publish_date = datetime.fromisoformat(publish_date).replace(tzinfo=timezone.utc)
@@ -51,6 +52,9 @@ class JNCBook:
         if updated_date is not None:
             updated_date = updated_date.rstrip('Z').split('.')[0]
             self.updated_date = datetime.fromisoformat(updated_date).replace(tzinfo=timezone.utc)
+        if purchase_date is not None:
+            purchase_date = purchase_date.rstrip('Z').split('.')[0]
+            self.purchase_date = datetime.fromisoformat(purchase_date).replace(tzinfo=timezone.utc)
 
 
 class JNCUtils:
@@ -217,6 +221,7 @@ class JNClient:
                 volume_num=volume['number'],
                 publish_date=volume['publishing'],
                 updated_date=item.get('lastUpdated', None),
+                purchase_date=item.get('purchased', None),
                 is_preorder=True if item['status'] == 'PREORDER' else False,
                 is_owned=volume['owned'],
                 series_id=item.get('serie', {}).get('legacyId', None),
