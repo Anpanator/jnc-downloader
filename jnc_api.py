@@ -26,18 +26,18 @@ class JNCBook:
     title: str
     title_slug: str
     volume_num: int
-    series_id: str
-    is_preorder: bool
-    series_slug: str = None
     publish_date: datetime
+    series_id: str
+    series_slug: str
+    is_owned: bool = None
+    is_preorder: bool = None
     updated_date: datetime = None
     purchase_date: datetime = None
-    is_owned: bool
     download_link: str = None
 
-    def __init__(self, book_id: str, title: str, title_slug: str, volume_num: int, series_id: str,
-                 publish_date: str, updated_date: str, purchase_date: str, is_preorder: bool, series_slug: str, is_owned: bool,
-                 download_link: str):
+    def __init__(self, book_id: str, title: str, title_slug: str, volume_num: int, publish_date: str, series_id: str,
+                 series_slug: str, is_preorder: bool = None, is_owned: bool = None, updated_date: str = None,
+                 purchase_date: str = None, download_link: str = None):
         publish_date = publish_date.rstrip('Z').split('.')[0]
         self.publish_date = datetime.fromisoformat(publish_date).replace(tzinfo=timezone.utc)
         self.series_id = series_id
@@ -57,7 +57,31 @@ class JNCBook:
             self.purchase_date = datetime.fromisoformat(purchase_date).replace(tzinfo=timezone.utc)
 
 
+class JNCSeries:
+    id: str
+    slug: str
+    tags: str
+    volumes: Dict[str, JNCBook]
+
+    def __init__(self, series_id: str, slug: str, tags: str, volumes: Dict[str, JNCBook]):
+        self.id = series_id
+        self.slug = slug
+        self.tags = tags
+        self.volumes = volumes
+
+
 class JNCUtils:
+    @staticmethod
+    def print_preorders(library: Dict[str, JNCBook]) -> None:
+        preorders = []
+        for book in library.values():
+            if book.is_preorder:
+                preorders.append(book)
+        if len(preorders):
+            print('\nCurrent preorders (Release Date / Title):')
+        for book in preorders:
+            print(f'{book.publish_date} {book.title}')
+
     @staticmethod
     def user_confirm(message: str) -> bool:
         answer = input(message + ' (y/n)')
@@ -97,17 +121,23 @@ class JNCUtils:
             f.write(download_response.content)
 
     @staticmethod
-    def filter_purchaseable_books(library: Dict[str, JNCBook]):
-        pass
+    def get_new_series(library: Dict[str, JNCBook], known_series: List[str]) -> List[str]:
+        """
+        :param library:
+        :param known_series: List of series title slugs that are already known
+        :return: List of series title slugs that are new
+        """
+        result = []
+        for book in library.values():
+            if book.series_slug != '' \
+                    and book.series_slug not in known_series \
+                    and book.series_slug not in result:
+                result.append(book.series_slug)
+        return result
 
-    """
     @staticmethod
-    def check_new_series(library: Dict[str, JNCBook], owned_series: Dict[str, JNCSeries]) -> None:
-        pass
-    """
-
-    @staticmethod
-    def check_completed_series(library: Dict[str, JNCBook]) -> None:
+    def unfollow_completed_series(library: Dict[str, JNCBook], series: Dict[str, JNCSeries],
+                                  series_follow_states: Dict[str, bool]) -> None:
         pass
 
     @staticmethod
@@ -140,6 +170,7 @@ class JNClient:
     FETCH_USER_URL = 'https://api.j-novel.club/api/users/me'  # ?filter={"include":[]}
     FETCH_LIBRARY_URL = 'https://labs.j-novel.club/app/v1/me/library?include=serie&format=json'
     BUY_CREDITS_URL = 'https://api.j-novel.club/api/users/me/purchasecredit'
+    FETCH_SERIES_URL = 'https://api.j-novel.club/api/series/findOne'
 
     ACCOUNT_TYPE_PREMIUM = 'PremiumMembership'
 
@@ -158,6 +189,41 @@ class JNClient:
             raise JNCApiError('Login failed!')
 
         return JNClient.create_jnc_user_data(login_response['id'], login_response['user'])
+
+    @staticmethod
+    def fetch_series_details(series_slugs: List[str]) -> Dict[str, JNCSeries]:
+        """Fetch information about a series from JNC, including the volumes of the series"""
+        result = {}
+        for series_slug in series_slugs:
+            filter_string = '{"where":{"titleslug":"%s"},"include":["volumes"]}' % series_slug
+            r = requests.get(
+                JNClient.FETCH_SERIES_URL,
+                params={'filter': filter_string}
+            )
+            if not r.status_code < 300:
+                raise JNCApiError(f'Could not fetch series details for {series_slug}')
+
+            content = r.json()
+            volumes = {}
+            for volume in content['volumes']:
+                book_id = volume['id']
+                volumes[book_id] = JNCBook(
+                    book_id=book_id,
+                    title=volume['title'],
+                    title_slug=volume['titleslug'],
+                    volume_num=volume['volumeNumber'],
+                    publish_date=volume['publishingDate'],
+                    series_id=content['id'],
+                    series_slug=series_slug
+                )
+
+            result[series_slug] = JNCSeries(
+                series_id=content['id'],
+                slug=content['titleslug'],
+                tags=content['tags'],
+                volumes=volumes
+            )
+        return result
 
     @staticmethod
     def fetch_user_data(auth_token: str) -> JNCUserData:
