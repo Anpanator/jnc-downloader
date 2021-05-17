@@ -12,6 +12,9 @@ class JNCUserData:
     auth_token: str
     premium_credits: int
     account_type: str
+    credit_price: int = None
+
+    ACCOUNT_TYPE_PREMIUM = 'PremiumMembership'
 
     def __init__(self, user_id: str, user_name: str, auth_token: str, premium_credits: int, account_type: str):
         self.user_id = user_id
@@ -19,6 +22,10 @@ class JNCUserData:
         self.auth_token = auth_token
         self.premium_credits = premium_credits
         self.account_type = account_type
+        if self.ACCOUNT_TYPE_PREMIUM in account_type:
+            self.credit_price = 6
+        else:
+            self.credit_price = 7
 
 
 class JNCBook:
@@ -105,7 +112,6 @@ class JNCUtils:
 
     @staticmethod
     def download_book(target_dir: str, book: JNCBook) -> None:
-
         if book.download_link is None:
             raise RuntimeError('Book does not have a download link.')
 
@@ -136,8 +142,21 @@ class JNCUtils:
         return result
 
     @staticmethod
+    def get_unowned_books(library: Dict[str, JNCBook], series_info: Dict[str, JNCSeries]) -> List[JNCBook]:
+        """
+        Returns a list of book ids that are not yet owned, but available
+        """
+        result = []
+        for series in series_info.values():
+            for volume in series.volumes.values():
+                if volume.book_id not in library:
+                    result.append(volume)
+        return result
+
+    @staticmethod
     def unfollow_completed_series(library: Dict[str, JNCBook], series: Dict[str, JNCSeries],
                                   series_follow_states: Dict[str, bool]) -> None:
+        # TODO
         pass
 
     @staticmethod
@@ -157,22 +176,55 @@ class JNCUtils:
                         and downloaded_book_dates[book_id] < book.updated_date):
                 try:
                     print(f'Downloading: {book.title}')
-                    # JNCUtils.download_book(target_dir=target_dir, book=book)
-                    # downloaded_book_dates[book_id] = now
+                    JNCUtils.download_book(target_dir=target_dir, book=book)
+                    downloaded_book_dates[book_id] = now
                 except JNCApiError as err:
                     print(err)
 
+    @staticmethod
+    def handle_new_books(new_books: List[JNCBook], user_data: JNCUserData,
+                         buy_credits: bool = False) -> Dict[str, JNCBook]:
+        """
+        :param buy_credits:
+        :param user_data:
+        :param new_books: Limited information JNCBooks from series info
+        :return: dictionary {book_id: JNCBook} of ordered books
+        """
+        ordered_books = {}
+        for book in new_books:
+            print(f'You have {user_data.premium_credits} credits')
+            if not JNCUtils.user_confirm(f'Do you want to order {book.title}?'):
+                continue
+            if user_data.premium_credits == 0 and buy_credits \
+                    and JNCUtils.user_confirm(f'Do you want to buy 1 credit?'):
+                print('Buying 1 credit')
+                user_data.premium_credits += 1
+                JNClient.buy_credits(user_data=user_data, amount=1)
+            if user_data.premium_credits == 0:
+                print('Out of credits, stopping order process!')
+                break
+            JNClient.order_book(book=book, user_data=user_data)
+            ordered_books[book.book_id] = JNClient.fetch_owned_book_info(auth_token=user_data.auth_token,
+                                                                         volume_id=book.book_id)
+            print(f'Ordered: {book.title}\n')
+        return ordered_books
+
 
 class JNClient:
-    """Everything you need to talk to the JNC API"""
+    """
+    Colletion of methods to talk to the JNC API
+
+    Partial reference:
+    https://forums.j-novel.club/topic/4370/developer-psa-current-epub-download-links-will-be-replaced-soon
+    """
 
     LOGIN_URL = 'https://api.j-novel.club/api/users/login?include=user'
     FETCH_USER_URL = 'https://api.j-novel.club/api/users/me'  # ?filter={"include":[]}
     FETCH_LIBRARY_URL = 'https://labs.j-novel.club/app/v1/me/library?include=serie&format=json'
     BUY_CREDITS_URL = 'https://api.j-novel.club/api/users/me/purchasecredit'
     FETCH_SERIES_URL = 'https://api.j-novel.club/api/series/findOne'
-
-    ACCOUNT_TYPE_PREMIUM = 'PremiumMembership'
+    FETCH_SINGLE_BOOK = 'https://labs.j-novel.club/app/v1/me/library/volume/%s?include=serie&format=json'  # %s = volume id
+    ORDER_URL_PATTERN = 'https://labs.j-novel.club/app/v1/me/redeem/%s'  # %s volume id
 
     @staticmethod
     def login(user: str, password: str) -> JNCUserData:
@@ -191,7 +243,38 @@ class JNClient:
         return JNClient.create_jnc_user_data(login_response['id'], login_response['user'])
 
     @staticmethod
-    def fetch_series_details(series_slugs: List[str]) -> Dict[str, JNCSeries]:
+    def order_book(book: JNCBook, user_data: JNCUserData) -> None:
+        """Order book on JNC side, i.e. redeem premium credit
+
+        Notable responses:
+            204: Success
+            401: Unauthorized
+            410: Session token expired
+            404: Volume not found
+            501: Can't buy manga at this time
+            402: No credits left to redeem
+            409: Already own this volume
+            500: Internal server error (reported to us)
+            Other: Unknown server error
+        """
+        if user_data.premium_credits <= 0:
+            raise NoCreditsError('No credits available to order book!')
+
+        response = requests.post(
+            JNClient.ORDER_URL_PATTERN % book.book_id,
+            headers={'Authorization': f'Bearer {user_data.auth_token}'}
+        )
+
+        if response.status_code == 409:
+            raise JNCApiError('Book already ordered')
+
+        if not response.ok:
+            raise JNCApiError(f'Error when ordering book. Response was: {response.status_code}')
+
+        user_data.premium_credits -= 1
+
+    @staticmethod
+    def fetch_series(series_slugs: List[str]) -> Dict[str, JNCSeries]:
         """Fetch information about a series from JNC, including the volumes of the series"""
         result = {}
         for series_slug in series_slugs:
@@ -273,31 +356,52 @@ class JNClient:
         result = {}
         content = response.json()
         for item in content['books']:
-            download_link = None
-            for link in item['downloads']:
-                download_link = link['link'] if link['type'] == 'EPUB' else None
-                if download_link is not None:
-                    break
-
-            volume = item['volume']
-            result[volume['legacyId']] = JNCBook(
-                book_id=volume['legacyId'],
-                title=volume['title'],
-                title_slug=volume['slug'],
-                volume_num=volume['number'],
-                publish_date=volume['publishing'],
-                updated_date=item.get('lastUpdated', None),
-                purchase_date=item.get('purchased', None),
-                is_preorder=True if item['status'] == 'PREORDER' else False,
-                is_owned=volume['owned'],
-                series_id=item.get('serie', {}).get('legacyId', None),
-                series_slug=item.get('serie', {}).get('slug', None),
-                download_link=download_link
-            )
+            result[item['volume']['legacyId']] = JNClient.create_jnc_book_from_api_response_item(item)
         return result
 
     @staticmethod
-    def buy_credits(auth_token: str, amount: int) -> None:
+    def fetch_owned_book_info(auth_token: str, volume_id: str) -> JNCBook:
+        """
+        Get single library book info. Book must be owned.
+        """
+        response = requests.get(
+            JNClient.FETCH_SINGLE_BOOK % volume_id,
+            headers={
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {auth_token}'
+            }
+        )
+        if not response.status_code < 300:
+            raise JNCApiError(f'Could not fetch book info! Response: {response.status_code}')
+        return JNClient.create_jnc_book_from_api_response_item(response.json())
+
+    @staticmethod
+    def create_jnc_book_from_api_response_item(item: dict) -> JNCBook:
+        download_link = None
+        for link in item['downloads']:
+            download_link = link['link'] if link['type'] == 'EPUB' else None
+            if download_link is not None:
+                break
+
+        volume = item['volume']
+        return JNCBook(
+            book_id=volume['legacyId'],
+            title=volume['title'],
+            title_slug=volume['slug'],
+            volume_num=volume['number'],
+            publish_date=volume['publishing'],
+            updated_date=item.get('lastUpdated', None),
+            purchase_date=item.get('purchased', None),
+            is_preorder=True if item['status'] == 'PREORDER' else False,
+            is_owned=volume['owned'],
+            series_id=item.get('serie', {}).get('legacyId', None),
+            series_slug=item.get('serie', {}).get('slug', None),
+            download_link=download_link
+        )
+
+    @staticmethod
+    def buy_credits(user_data: JNCUserData, amount: int) -> None:
         """
         Buy premium credits on JNC. Max. amount: 10. Price depends on membership status.
 
@@ -312,7 +416,7 @@ class JNClient:
             headers={
                 'Accept': 'application/json',  # maybe */*?
                 'Content-Type': 'application/json',
-                'Authorization': auth_token
+                'Authorization': user_data.auth_token
             },
             json={'number': amount},
             allow_redirects=False
@@ -320,6 +424,8 @@ class JNClient:
 
         if not response.status_code < 300:
             raise JNCApiError('Could not purchase credits!')
+
+        user_data.premium_credits += amount
 
 
 class JNCApiError(Exception):
