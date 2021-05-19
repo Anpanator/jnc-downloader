@@ -161,10 +161,19 @@ class JNCUtils:
         return result
 
     @staticmethod
-    def unfollow_completed_series(library: Dict[str, JNCBook], series: Dict[str, JNCSeries],
+    def unfollow_completed_series(downloaded_book_ids: List[str], series: Dict[str, JNCSeries],
                                   series_follow_states: Dict[str, bool]) -> None:
-        # TODO
-        pass
+        for serie in series.values():
+            is_completed = True
+            if 'fully translated' not in serie.tags:
+                continue
+            for book_id in serie.volumes:
+                if book_id not in downloaded_book_ids:
+                    is_completed = False
+                    break
+            if is_completed:
+                print(f'{serie.slug} is fully owned and translated. Series will be unfollowed.')
+                series_follow_states[serie.slug] = False
 
     @staticmethod
     def process_library(library: Dict[str, JNCBook], downloaded_book_dates: Dict[str, datetime], target_dir: str,

@@ -166,7 +166,11 @@ if enable_order_books:
                     f'credits available. Do you want to buy {missing_credits} credits '
                     f'for ${user_data.credit_price * missing_credits}?'
             )):
-        pass
+        while missing_credits > 0:
+            buy_amount = min(10, missing_credits)
+            print(f'Buying {buy_amount} credits')
+            JNClient.buy_credits(user_data=user_data, amount=buy_amount)
+            missing_credits -= buy_amount
 
     ordered_books = JNCUtils.handle_new_books(
         new_books=new_books,
@@ -185,6 +189,12 @@ JNCUtils.process_library(
     downloaded_book_dates=downloaded_books_dates,
     target_dir=download_target_dir,
     include_updated=update_books
+)
+
+JNCUtils.unfollow_completed_series(
+    downloaded_book_ids=[*downloaded_books_dates],
+    series=series_info,
+    series_follow_states=series_follow_states
 )
 
 with open(token_file, mode='w', newline='') as f:
