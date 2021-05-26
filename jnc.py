@@ -83,6 +83,10 @@ downloaded_books_file = os.path.expanduser(downloaded_books_file)
 owned_series_file = os.path.expanduser(owned_series_file)
 token_file = os.path.expanduser(token_file)
 
+# make sure files exist
+open(downloaded_books_file, 'a').close()
+open(owned_series_file, 'a').close()
+
 # parse downloaded books file
 downloaded_books_dates = {}
 csv_is_legacy_format = False
