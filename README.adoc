@@ -5,7 +5,7 @@ A python script to download ebooks from your j-novel.club library.
 == How to use
 Just adjust the values in the config area denoted at the top of the jnc.py file and execute the script.
 
-By default, it will only download already purchased books from your library.
+By default, it will only download purchased books from your library that you didn't download before (on the machine you run the script from).
 Use `--update-books` to also download updated epubs.
 Note that when running this for the first time and used versions <= 2.5.1 of this tool, it may re-download a large portion of your library.
 
