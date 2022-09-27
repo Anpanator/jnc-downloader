@@ -14,10 +14,15 @@ MIN_PYTHON = (3, 7)
 assert sys.version_info >= MIN_PYTHON, f'requires Python {".".join([str(n) for n in MIN_PYTHON])} or newer'
 
 # Config: START
-download_target_dir = '~/Downloads/'
-downloaded_books_file = '~/.downloadedJncBooks.csv'  # Format book_id + \t + title_slug + \t + download date
-owned_series_file = '~/.jncOwnedSeries.csv'  # Format series_title_slug + \t + followed (boolean)
-token_file = '~/.jncToken'
+# override with ENV vars, e.g. JNC_DOWNLOAD_TARGET_DIR="~/Documents/" ./jnc.py --order
+download_target_dir = os.environ.get('JNC_DOWNLOAD_TARGET_DIR', '~/Downloads/')
+downloaded_books_file = os.environ.get('JNC_DOWNLOADED_BOOKS_FILE', '~/.downloadedJncBooks.csv')  # Format book_id + \t + title_slug + \t + download date
+owned_series_file = os.environ.get('JNC_OWNED_SERIES_FILE', '~/.jncOwnedSeries.csv')  # Format series_title_slug + \t + followed (boolean)
+token_file = os.environ.get('JNC_TOKEN_FILE', '~/.jncToken')
+login_email = os.environ.get('JNC_LOGIN_EMAIL', None) # Will prompt.
+login_pw = os.environ.get('JNC_LOGIN_PW', None)
+# -- or just redefine these variables between here and Config: END.
+
 # Config: END
 
 parser = ArgumentParser()
@@ -121,6 +126,12 @@ try:
         user_data = JNClient.fetch_user_data(jnc_token)
 except JNCUnauthorizedError:
     pass
+
+if user_data is None and login_email and login_pw:
+    try:
+        user_data = JNClient.login(login_email, login_pw)
+    except JNCApiError as e:
+        print(e)
 
 while user_data is None:
     try:
