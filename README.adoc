@@ -11,7 +11,7 @@ Note that when running this for the first time and used versions <= 2.5.1 of thi
 
 It will also ask you if you want to follow series it does not know about yet and print avaliable volumes you don't own of series you follow.
 
-The script optionally supports auto order of books and auto purchase of premium credits.
+The script optionally supports auto order of books and auto purchase of J-Novel coins.
 For details about this, refer to the output of `python3 jnc.py --help`
 
 == Limitations

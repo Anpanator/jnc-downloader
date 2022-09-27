@@ -10,22 +10,23 @@ class JNCUserData:
     user_id: str
     user_name: str
     auth_token: str
-    premium_credits: int
+    coins: int
     account_type: str
-    credit_price: int = None
+    coin_discount: int = 0
 
     ACCOUNT_TYPE_PREMIUM = 'PremiumMembership'
+    ACCOUNT_TYPE_REGULAR = 'RegularMembership'
 
-    def __init__(self, user_id: str, user_name: str, auth_token: str, premium_credits: int, account_type: str):
+    def __init__(self, user_id: str, user_name: str, auth_token: str, coins: int, account_type: str):
         self.user_id = user_id
         self.user_name = user_name
         self.auth_token = auth_token
-        self.premium_credits = premium_credits
+        self.coins = coins
         self.account_type = account_type
         if self.ACCOUNT_TYPE_PREMIUM in account_type:
-            self.credit_price = 6
-        else:
-            self.credit_price = 7
+            self.coin_discount = 15
+        elif self.ACCOUNT_TYPE_REGULAR in account_type:
+            self.coin_discount = 5
 
 
 class JNCBook:
@@ -41,10 +42,11 @@ class JNCBook:
     updated_date: datetime = None
     purchase_date: datetime = None
     download_link: str = None
+    price: int
 
     def __init__(self, book_id: str, title: str, title_slug: str, volume_num: int, publish_date: str, series_id: str,
                  series_slug: str, is_preorder: bool = None, is_owned: bool = None, updated_date: str = None,
-                 purchase_date: str = None, download_link: str = None):
+                 purchase_date: str = None, download_link: str = None, price: int = 0):
         publish_date = publish_date.rstrip('Z').split('.')[0]
         self.publish_date = datetime.fromisoformat(publish_date).replace(tzinfo=timezone.utc)
         self.series_id = series_id
@@ -56,12 +58,29 @@ class JNCBook:
         self.series_slug = series_slug
         self.is_owned = is_owned
         self.download_link = download_link
+        self._price = price
         if updated_date is not None:
             updated_date = updated_date.rstrip('Z').split('.')[0]
             self.updated_date = datetime.fromisoformat(updated_date).replace(tzinfo=timezone.utc)
         if purchase_date is not None:
             purchase_date = purchase_date.rstrip('Z').split('.')[0]
             self.purchase_date = datetime.fromisoformat(purchase_date).replace(tzinfo=timezone.utc)
+
+    @property
+    def price(self):
+        if self._price > 0:
+            return self._price
+        price_response = requests.get(
+            JNClient.FETCH_BOOK_PRICE_URL % self.book_id,
+            headers={
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+            }
+        )
+        if price_response.status_code != 200:
+            raise JNCApiError(str(price_response.status_code) + ': Book price not available.')
+        self._price = price_response.json()['coins']
+        return self._price
 
 
 class JNCSeries:
@@ -75,6 +94,28 @@ class JNCSeries:
         self.slug = slug
         self.tags = tags
         self.volumes = volumes
+
+
+class JNCCoinOptions:
+    coinPriceInCents: int
+    purchaseMinimumCoins: int
+    purchaseMaximumCoins: int
+    coinDiscount: int
+    packs: [Dict[str, int]]
+
+    def __init__(self, coinPriceInCents: int, purchaseMinimumCoins: int, purchaseMaximumCoins: int, packs: List[Dict[str, int]]):
+        self.coinPriceInCents = coinPriceInCents
+        self.purchaseMinimumCoins = purchaseMinimumCoins
+        self.purchaseMaximumCoins = purchaseMaximumCoins
+        self.packs = packs
+        current, original = packs[0]['currentCentsCost'], packs[0]['originalCentsCost']
+        self.coinDiscount = int((1-current/original)*100)
+
+    def nearest_pack(self, amount) -> tuple[int, int]:
+        for pack in self.packs:
+            if pack['coins'] > amount:
+                return pack['coins'], pack['currentCentsCost']
+        return self.packs[-1]['coins'], self.packs[-1]['currentCentsCost']
 
 
 class JNCUtils:
@@ -94,7 +135,7 @@ class JNCUtils:
         now = datetime.now(tz=timezone.utc)
         for book in books:
             availability = 'Preorder:' if now < book.publish_date else 'Available:'
-            print(f'{availability} \t{book.title}')
+            print(f'({book.price} coins) {availability}\t{book.title}')
 
     @staticmethod
     def user_confirm(message: str) -> bool:
@@ -199,28 +240,27 @@ class JNCUtils:
 
     @staticmethod
     def handle_new_books(new_books: List[JNCBook], user_data: JNCUserData,
-                         buy_credits: bool = False, no_confirm_order: bool = False,
-                         no_confirm_credits: bool = False) -> Dict[str, JNCBook]:
+                         buy_coins: bool = False, no_confirm_order: bool = False,
+                         no_confirm_coins: bool = False) -> Dict[str, JNCBook]:
         """
-        :param no_confirm_credits:
+        :param no_confirm_coins:
         :param no_confirm_order:
-        :param buy_credits:
+        :param buy_coins:
         :param user_data:
         :param new_books: Limited information JNCBooks from series info
         :return: dictionary {book_id: JNCBook} of ordered books
         """
         ordered_books = {}
         for book in new_books:
-            print(f'You have {user_data.premium_credits} credits')
+            print(f'You have {user_data.coins} coins')
             if not no_confirm_order and not JNCUtils.user_confirm(f'Do you want to order {book.title}?'):
                 continue
-            if user_data.premium_credits == 0 and buy_credits \
-                    and (no_confirm_credits or JNCUtils.user_confirm(f'Do you want to buy 1 credit?')):
-                print('Buying 1 credit')
-                user_data.premium_credits += 1
-                JNClient.buy_credits(user_data=user_data, amount=1)
-            if user_data.premium_credits == 0:
-                print('Out of credits, stopping order process!')
+            if user_data.coins == 0 and buy_coins \
+                    and (no_confirm_coins or JNCUtils.user_confirm(f'Do you want to buy {book.price} coins?')):
+                print(f'Buying {book.price} coins')
+                JNClient.buy_coins(user_data=user_data, amount=book.price)
+            if user_data.coins < book.price:
+                print('Not enough coins, stopping order process!')
                 break
             JNClient.order_book(book=book, user_data=user_data)
             ordered_books[book.book_id] = JNClient.fetch_owned_book_info(auth_token=user_data.auth_token,
@@ -240,10 +280,12 @@ class JNClient:
     LOGIN_URL = 'https://api.j-novel.club/api/users/login?include=user'
     FETCH_USER_URL = 'https://api.j-novel.club/api/users/me'  # ?filter={"include":[]}
     FETCH_LIBRARY_URL = 'https://labs.j-novel.club/app/v1/me/library?include=serie&format=json'
-    BUY_CREDITS_URL = 'https://api.j-novel.club/api/users/me/purchasecredit'
+    BUY_COINS_URL = 'https://labs.j-novel.club/app/v1/me/coins/purchase'
+    COINS_OPTIONS_URL = 'https://labs.j-novel.club/app/v1/me/coins/options?format=json'
     FETCH_SERIES_URL = 'https://api.j-novel.club/api/series/findOne'
     FETCH_SINGLE_BOOK = 'https://labs.j-novel.club/app/v1/me/library/volume/%s?include=serie&format=json'  # %s = volume id
-    ORDER_URL_PATTERN = 'https://labs.j-novel.club/app/v1/me/redeem/%s'  # %s volume id
+    ORDER_WITH_COINS_URL_PATTERN = 'https://labs.j-novel.club/app/v1/me/coins/redeem/%s'  # %s volume id
+    FETCH_BOOK_PRICE_URL = 'https://labs.j-novel.club/app/v1/volumes/%s/price?format=json'
 
     @staticmethod
     def login(user: str, password: str) -> JNCUserData:
@@ -271,16 +313,18 @@ class JNClient:
             410: Session token expired
             404: Volume not found
             501: Can't buy manga at this time
-            402: No credits left to redeem
+            402: Not enough coins to purchase
             409: Already own this volume
             500: Internal server error (reported to us)
             Other: Unknown server error
         """
-        if user_data.premium_credits <= 0:
-            raise NoCreditsError('No credits available to order book!')
+        if user_data.coins >= book.price:
+            pattern = JNClient.ORDER_WITH_COINS_URL_PATTERN
+        else:
+            raise NoCoinsError('Not enough coins available to order book!')
 
         response = requests.post(
-            JNClient.ORDER_URL_PATTERN % book.book_id,
+            pattern % book.book_id,
             headers={'Authorization': f'Bearer {user_data.auth_token}'}
         )
 
@@ -289,8 +333,8 @@ class JNClient:
 
         if not response.ok:
             raise JNCApiError(f'Error when ordering book. Response was: {response.status_code}')
-
-        user_data.premium_credits -= 1
+        
+        user_data.coins -= book.price
 
     @staticmethod
     def fetch_series(series_slugs: List[str]) -> Dict[str, JNCSeries]:
@@ -349,13 +393,26 @@ class JNClient:
         return JNClient.create_jnc_user_data(auth_token, user_response.json())
 
     @staticmethod
+    def fetch_coin_options(auth_token: str) -> JNCCoinOptions:
+        coins_options_response = requests.get(
+            JNClient.COINS_OPTIONS_URL,
+            headers={
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {auth_token}'
+            }
+        )
+        resp = coins_options_response.json()
+        return JNCCoinOptions(resp['coinPriceInCents'], resp['purchaseMinimumCoins'], resp['purchaseMaximumCoins'], resp['packs'])
+
+    @staticmethod
     def create_jnc_user_data(auth_token: str, user_data: dict) -> JNCUserData:
         subscription = user_data['currentSubscription']
         return JNCUserData(
             user_id=user_data['id'],
             user_name=user_data['username'],
             auth_token=auth_token,
-            premium_credits=user_data['earnedCredits'] - user_data['usedCredits'],
+            coins=user_data['coins'],
             account_type=subscription['plan']['id'] if 'plan' in subscription else None
         )
 
@@ -420,32 +477,32 @@ class JNClient:
         )
 
     @staticmethod
-    def buy_credits(user_data: JNCUserData, amount: int) -> None:
+    def buy_coins(user_data: JNCUserData, amount: int) -> None:
         """
-        Buy premium credits on JNC. Max. amount: 10. Price depends on membership status.
+        Buy coins on JNC.
 
         :raises ArgumentError   when amount is out of range
         :raises JNCApiError     when the purchase request fails for any reason
         """
-        if 0 >= amount > 10:
-            raise ArgumentError('It is not possible to buy less than 1 or more than 10 credits.')
+        if 699 > amount:
+            raise ArgumentError('It is not possible to buy less than 699 coins.')
 
+        # Needs processor, amount, stripePaymentIntent?
         response = requests.post(
-            JNClient.BUY_CREDITS_URL,
+            JNClient.BUY_COINS_URL,
             headers={
-                'Accept': 'application/json',  # maybe */*?
+                'Authorization': f'Bearer {user_data.auth_token}',
+                'Accept': 'application/json',
                 'Content-Type': 'application/json',
-                'Authorization': user_data.auth_token
             },
-            json={'number': amount},
+            json={'amount': amount},
             allow_redirects=False
         )
 
         if not response.status_code < 300:
-            raise JNCApiError('Could not purchase credits!')
+            raise JNCApiError('Could not purchase coins!')
 
-        user_data.premium_credits += amount
-
+        user_data.coins += amount
 
 class JNCApiError(Exception):
     pass
@@ -455,7 +512,7 @@ class JNCUnauthorizedError(JNCApiError):
     pass
 
 
-class NoCreditsError(Exception):
+class NoCoinsError(Exception):
     pass
 
 

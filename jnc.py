@@ -40,12 +40,12 @@ parser.add_argument("--update-books",
                     default=False,
                     help="Checks if books have been updated by JNC and downloads them again if that is the case."
                     )
-parser.add_argument("--credits",
-                    dest="credits",
+parser.add_argument("--coins", "--credits",
+                    dest="coins",
                     action='store_const',
                     const=True,
                     default=False,
-                    help="Enables buying credits. Each purchase requires confirmation by default."
+                    help="Enables buying J-Novel coins. Each purchase requires confirmation by default."
                     )
 parser.add_argument("--no-confirm-all",
                     dest="no_confirm_all",
@@ -61,12 +61,12 @@ parser.add_argument("--no-confirm-order",
                     default=False,
                     help="Disable user confirmations for ordering books and assume 'yes'. USE WITH CAUTION!!! This can spend money!"
                     )
-parser.add_argument("--no-confirm-credits",
-                    dest="no_confirm_credits",
+parser.add_argument("--no-confirm-coins", "--no-confirm-credits",
+                    dest="no_confirm_coins",
                     action='store_const',
                     const=True,
                     default=False,
-                    help="Disable user confirmations for buying premium credits and assume 'yes'. USE WITH CAUTION!!! This can spend money!"
+                    help="Disable user confirmations for buying J-Novel coins and assume 'yes'. USE WITH CAUTION!!! This can spend money!"
                     )
 parser.add_argument("--no-confirm-series-follow",
                     dest="no_confirm_series",
@@ -77,11 +77,11 @@ parser.add_argument("--no-confirm-series-follow",
                     )
 args = parser.parse_args()
 enable_order_books = args.order
-enable_buy_credits = args.credits
+enable_buy_coins = args.coins
 update_books = args.update_books
 no_confirm_order = args.no_confirm_all or args.no_confirm_order
 no_confirm_series = args.no_confirm_all or args.no_confirm_series
-no_confirm_credits = args.no_confirm_all or args.no_confirm_credits
+no_confirm_coins = args.no_confirm_all or args.no_confirm_coins
 
 download_target_dir = os.path.expanduser(download_target_dir)
 downloaded_books_file = os.path.expanduser(downloaded_books_file)
@@ -141,9 +141,9 @@ while user_data is None:
     except JNCApiError as e:
         print(e)
 
-print(f'You have {user_data.premium_credits} credits')
-if user_data.credit_price is not None:
-    print(f'Each premium credit you buy costs ${user_data.credit_price}')
+print(f'You have {user_data.coins} coins.')
+if user_data.coin_discount:
+    print(f'You can buy coins at a {user_data.coin_discount}% discount.')
 library = JNClient.fetch_library(user_data.auth_token)
 
 """
@@ -170,28 +170,36 @@ series_info = JNClient.fetch_series(followed_series)
 new_books = JNCUtils.get_unowned_books(library=library, series_info=series_info)
 new_book_cnt = len(new_books)
 print(f'There are {new_book_cnt} new volumes available:')
+total_price = 0
+for book in new_books:
+    total_price += book.price
 JNCUtils.print_books(new_books)
+missing_coins = total_price - user_data.coins
 if enable_order_books:
-    missing_credits = new_book_cnt - user_data.premium_credits
-    if (missing_credits > 0) \
-            and enable_buy_credits \
-            and (no_confirm_credits
+    coin_opts = JNClient.fetch_coin_options(user_data.auth_token)
+    missing_coins = max(missing_coins, coin_opts.purchaseMinimumCoins)
+    cost = missing_coins * (100 - coin_opts.coinDiscount) * coin_opts.coinPriceInCents / 10000
+    if (missing_coins > 0) \
+            and enable_buy_coins \
+            and (no_confirm_coins
                  or JNCUtils.user_confirm(
-                    f'{new_book_cnt} new books available. You have {user_data.premium_credits} '
-                    f'credits available. Do you want to buy {missing_credits} credits '
-                    f'for ${user_data.credit_price * missing_credits}?'
+                    f'{new_book_cnt} new books available. It will cost '
+                    f'{total_price} coins to purchase them all. You have '
+                    f'{user_data.coins} coins available. Purchase '
+                    f'{missing_coins} coins for ${cost:,.2f}?'
             )):
-        while missing_credits > 0:
-            buy_amount = min(10, missing_credits)
-            print(f'Buying {buy_amount} credits')
-            JNClient.buy_credits(user_data=user_data, amount=buy_amount)
-            missing_credits -= buy_amount
+        while missing_coins > 0:
+            buy_amount = min(coin_opts.purchaseMaximumCoins, missing_coins)
+            print(f'Buying {buy_amount} coins')
+            JNClient.buy_coins(user_data=user_data, amount=buy_amount)
+            missing_coins -= buy_amount
+
 
     ordered_books = JNCUtils.handle_new_books(
         new_books=new_books,
         user_data=user_data,
-        buy_credits=enable_buy_credits,
-        no_confirm_credits=no_confirm_credits,
+        buy_coins=enable_buy_coins,
+        no_confirm_coins=no_confirm_coins,
         no_confirm_order=no_confirm_order)
     library |= ordered_books
 
