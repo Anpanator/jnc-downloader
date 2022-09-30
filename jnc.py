@@ -177,8 +177,8 @@ JNCUtils.print_books(new_books)
 missing_coins = total_price - user_data.coins
 if enable_order_books:
     coin_opts = JNClient.fetch_coin_options(user_data.auth_token)
-    missing_coins = max(missing_coins, coin_opts.purchaseMinimumCoins)
-    cost = missing_coins * (100 - coin_opts.coinDiscount) * coin_opts.coinPriceInCents / 10000
+    purchase_coins = max(missing_coins, coin_opts.purchaseMinimumCoins)
+    cost = purchase_coins * (100 - coin_opts.coinDiscount) * coin_opts.coinPriceInCents / 10000
     if (missing_coins > 0) \
             and enable_buy_coins \
             and (no_confirm_coins
@@ -186,13 +186,13 @@ if enable_order_books:
                     f'{new_book_cnt} new books available. It will cost '
                     f'{total_price} coins to purchase them all. You have '
                     f'{user_data.coins} coins available. Purchase '
-                    f'{missing_coins} coins for ${cost:,.2f}?'
+                    f'{purchase_coins} coins for ${cost:,.2f}?'
             )):
-        while missing_coins > 0:
-            buy_amount = min(coin_opts.purchaseMaximumCoins, missing_coins)
+        while purchase_coins > 0:
+            buy_amount = min(coin_opts.purchaseMaximumCoins, purchase_coins)
             print(f'Buying {buy_amount} coins')
             JNClient.buy_coins(user_data=user_data, amount=buy_amount)
-            missing_coins -= buy_amount
+            purchase_coins -= buy_amount
 
 
     ordered_books = JNCUtils.handle_new_books(

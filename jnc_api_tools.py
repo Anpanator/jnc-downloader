@@ -280,11 +280,12 @@ class JNClient:
     LOGIN_URL = 'https://api.j-novel.club/api/users/login?include=user'
     FETCH_USER_URL = 'https://api.j-novel.club/api/users/me'  # ?filter={"include":[]}
     FETCH_LIBRARY_URL = 'https://labs.j-novel.club/app/v1/me/library?include=serie&format=json'
-    BUY_COINS_URL = 'https://labs.j-novel.club/app/v1/me/coins/purchase'
+    BUY_COINS_URL = 'https://labs.j-novel.club/app/v1/me/coins/purchase?format=json'
     COINS_OPTIONS_URL = 'https://labs.j-novel.club/app/v1/me/coins/options?format=json'
+    PAYMENT_METHOD_URL ='https://labs.j-novel.club/app/v1/me/method?format=json'
     FETCH_SERIES_URL = 'https://api.j-novel.club/api/series/findOne'
     FETCH_SINGLE_BOOK = 'https://labs.j-novel.club/app/v1/me/library/volume/%s?include=serie&format=json'  # %s = volume id
-    ORDER_WITH_COINS_URL_PATTERN = 'https://labs.j-novel.club/app/v1/me/coins/redeem/%s'  # %s volume id
+    ORDER_WITH_COINS_URL_PATTERN = 'https://labs.j-novel.club/app/v1/me/coins/redeem/%s?format=json'  # %s volume id
     FETCH_BOOK_PRICE_URL = 'https://labs.j-novel.club/app/v1/volumes/%s/price?format=json'
 
     @staticmethod
@@ -406,6 +407,19 @@ class JNClient:
         return JNCCoinOptions(resp['coinPriceInCents'], resp['purchaseMinimumCoins'], resp['purchaseMaximumCoins'], resp['packs'])
 
     @staticmethod
+    def fetch_payment_method_id(auth_token: str) -> int:
+        payment_method_response = requests.get(
+            JNClient.PAYMENT_METHOD_URL,
+            headers={
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {auth_token}'
+            }
+        )
+        resp = payment_method_response.json()
+        return resp['id']
+
+    @staticmethod
     def create_jnc_user_data(auth_token: str, user_data: dict) -> JNCUserData:
         subscription = user_data['currentSubscription']
         return JNCUserData(
@@ -484,10 +498,9 @@ class JNClient:
         :raises ArgumentError   when amount is out of range
         :raises JNCApiError     when the purchase request fails for any reason
         """
-        if 699 > amount:
-            raise ArgumentError('It is not possible to buy less than 699 coins.')
+        if 500 > amount:
+            raise ArgumentError('It is not possible to buy less than 500 coins.')
 
-        # Needs processor, amount, stripePaymentIntent?
         response = requests.post(
             JNClient.BUY_COINS_URL,
             headers={
@@ -495,13 +508,24 @@ class JNClient:
                 'Accept': 'application/json',
                 'Content-Type': 'application/json',
             },
-            json={'amount': amount},
+            json={
+                'processor':'STRIPE',
+                'amount': amount,
+                'stripe_payment_intent': {
+                    'payment_method': JNClient.fetch_payment_method_id(user_data.auth_token)
+                }
+            },
             allow_redirects=False
         )
 
         if not response.status_code < 300:
             raise JNCApiError('Could not purchase coins!')
 
+        resp = response.json()
+        if response.status_code == 200 and resp['ok'] == False:
+            message = resp['message']
+            raise JNCApiError(f'Could not purchase coins: {message}')
+        print(resp['message'])
         user_data.coins += amount
 
 class JNCApiError(Exception):
