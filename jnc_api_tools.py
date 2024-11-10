@@ -14,8 +14,8 @@ class JNCUserData:
     account_type: str
     coin_discount: int = 0
 
-    ACCOUNT_TYPE_PREMIUM = 'PremiumMembership'
-    ACCOUNT_TYPE_REGULAR = 'RegularMembership'
+    ACCOUNT_TYPE_PREMIUM = 'PREMIUM'
+    ACCOUNT_TYPE_REGULAR = 'REGULAR'
 
     def __init__(self, user_id: str, user_name: str, auth_token: str, coins: int, account_type: str):
         self.user_id = user_id
@@ -23,9 +23,9 @@ class JNCUserData:
         self.auth_token = auth_token
         self.coins = coins
         self.account_type = account_type
-        if self.ACCOUNT_TYPE_PREMIUM in account_type:
+        if self.ACCOUNT_TYPE_PREMIUM in account_type.upper():
             self.coin_discount = 15
-        elif self.ACCOUNT_TYPE_REGULAR in account_type:
+        elif self.ACCOUNT_TYPE_REGULAR in account_type.upper():
             self.coin_discount = 5
 
 
@@ -33,6 +33,7 @@ class JNCBook:
     book_id: str
     title: str
     title_slug: str
+    volume_id: str
     volume_num: int
     publish_date: datetime
     series_id: str
@@ -44,12 +45,13 @@ class JNCBook:
     download_link: str = None
     price: int
 
-    def __init__(self, book_id: str, title: str, title_slug: str, volume_num: int, publish_date: str, series_id: str,
+    def __init__(self, book_id: str, title: str, title_slug: str, volume_id: str, volume_num: int, publish_date: str, series_id: str,
                  series_slug: str, is_preorder: bool = None, is_owned: bool = None, updated_date: str = None,
                  purchase_date: str = None, download_link: str = None, price: int = 0):
         publish_date = publish_date.rstrip('Z').split('.')[0]
         self.publish_date = datetime.fromisoformat(publish_date).replace(tzinfo=timezone.utc)
         self.series_id = series_id
+        self.volume_id = volume_id
         self.volume_num = volume_num
         self.title_slug = title_slug
         self.title = title
@@ -71,7 +73,7 @@ class JNCBook:
         if self._price > 0:
             return self._price
         price_response = requests.get(
-            JNClient.FETCH_BOOK_PRICE_URL % self.book_id,
+            JNClient.FETCH_BOOK_PRICE_URL % self.title_slug,
             headers={
                 'Accept': 'application/json',
                 'Content-Type': 'application/json',
@@ -264,7 +266,7 @@ class JNCUtils:
                 break
             JNClient.order_book(book=book, user_data=user_data)
             ordered_books[book.book_id] = JNClient.fetch_owned_book_info(auth_token=user_data.auth_token,
-                                                                         volume_id=book.book_id)
+                                                                         volume_id=book.volume_id)
             print(f'Ordered: {book.title}\n')
         return ordered_books
 
@@ -277,16 +279,16 @@ class JNClient:
     https://forums.j-novel.club/topic/4370/developer-psa-current-epub-download-links-will-be-replaced-soon
     """
 
-    LOGIN_URL = 'https://api.j-novel.club/api/users/login?include=user'
-    FETCH_USER_URL = 'https://api.j-novel.club/api/users/me'  # ?filter={"include":[]}
-    FETCH_LIBRARY_URL = 'https://labs.j-novel.club/app/v1/me/library?include=serie&format=json'
-    BUY_COINS_URL = 'https://labs.j-novel.club/app/v1/me/coins/purchase?format=json'
-    COINS_OPTIONS_URL = 'https://labs.j-novel.club/app/v1/me/coins/options?format=json'
-    PAYMENT_METHOD_URL ='https://labs.j-novel.club/app/v1/me/method?format=json'
-    FETCH_SERIES_URL = 'https://api.j-novel.club/api/series/findOne'
-    FETCH_SINGLE_BOOK = 'https://labs.j-novel.club/app/v1/me/library/volume/%s?include=serie&format=json'  # %s = volume id
-    ORDER_WITH_COINS_URL_PATTERN = 'https://labs.j-novel.club/app/v1/me/coins/redeem/%s?format=json'  # %s volume id
-    FETCH_BOOK_PRICE_URL = 'https://labs.j-novel.club/app/v1/volumes/%s/price?format=json'
+    LOGIN_URL = 'https://labs.j-novel.club/app/v2/auth/login?format=json'
+    FETCH_USER_URL = 'https://labs.j-novel.club/app/v2/me?format=json'
+    FETCH_LIBRARY_URL = 'https://labs.j-novel.club/app/v2/me/library?include=serie&format=json'
+    BUY_COINS_URL = 'https://labs.j-novel.club/app/v2/me/coins/purchase?format=json'
+    COINS_OPTIONS_URL = 'https://labs.j-novel.club/app/v2/me/coins/options?format=json'
+    PAYMENT_METHOD_URL ='https://labs.j-novel.club/app/v2/me/method?format=json'
+    FETCH_SERIES_URL = 'https://labs.j-novel.club/app/v2/series/%s/aggregate?format=json' # %s = series id or slug
+    FETCH_SINGLE_BOOK = 'https://labs.j-novel.club/app/v2/me/library/volume/%s?include=serie&format=json'  # %s = volume id
+    ORDER_WITH_COINS_URL_PATTERN = 'https://labs.j-novel.club/app/v2/me/coins/redeem/%s?format=json'  # %s volume id or slug
+    FETCH_BOOK_PRICE_URL = 'https://labs.j-novel.club/app/v2/volumes/%s/price?format=json' # %s volume id or slug
 
     @staticmethod
     def login(user: str, password: str) -> JNCUserData:
@@ -296,13 +298,13 @@ class JNClient:
         login_response = requests.post(
             JNClient.LOGIN_URL,
             headers={'Accept': 'application/json', 'content-type': 'application/json'},
-            json={'email': user, 'password': password}
+            json={'login': user, 'password': password}
         ).json()
 
         if 'error' in login_response:
             raise JNCApiError('Login failed!')
 
-        return JNClient.create_jnc_user_data(login_response['id'], login_response['user'])
+        return JNClient.fetch_user_data(login_response['id'])
 
     @staticmethod
     def order_book(book: JNCBook, user_data: JNCUserData) -> None:
@@ -323,9 +325,8 @@ class JNClient:
             pattern = JNClient.ORDER_WITH_COINS_URL_PATTERN
         else:
             raise NoCoinsError('Not enough coins available to order book!')
-
         response = requests.post(
-            pattern % book.book_id,
+            pattern % book.volume_id,
             headers={'Authorization': f'Bearer {user_data.auth_token}'}
         )
 
@@ -342,32 +343,32 @@ class JNClient:
         """Fetch information about a series from JNC, including the volumes of the series"""
         result = {}
         for series_slug in series_slugs:
-            filter_string = '{"where":{"titleslug":"%s"},"include":["volumes"]}' % series_slug
             r = requests.get(
-                JNClient.FETCH_SERIES_URL,
-                params={'filter': filter_string}
+                JNClient.FETCH_SERIES_URL % series_slug,
             )
             if not r.status_code < 300:
                 raise JNCApiError(f'Could not fetch series details for {series_slug}')
 
             content = r.json()
             volumes = {}
-            for volume in content['volumes']:
-                book_id = volume['id']
+            for volandparts in content['volumes']:
+                volume=volandparts['volume']
+                book_id = volume['legacyId']
                 volumes[book_id] = JNCBook(
                     book_id=book_id,
                     title=volume['title'],
-                    title_slug=volume['titleslug'],
-                    volume_num=volume['volumeNumber'],
-                    publish_date=volume['publishingDate'],
-                    series_id=content['id'],
-                    series_slug=series_slug
+                    title_slug=volume['slug'],
+                    volume_id=volume['id'],
+                    volume_num=volume['number'],
+                    publish_date=volume['publishing'],
+                    series_id=content['series']['legacyId'],
+                    series_slug=content['series']['slug']
                 )
 
             result[series_slug] = JNCSeries(
-                series_id=content['id'],
-                slug=content['titleslug'],
-                tags=content['tags'],
+                series_id=content['series']['legacyId'],
+                slug=content['series']['slug'],
+                tags=','.join(content['series']['tags']),
                 volumes=volumes
             )
         return result
@@ -383,7 +384,7 @@ class JNClient:
             headers={
                 'Accept': 'application/json',
                 'Content-Type': 'application/json',
-                'Authorization': auth_token
+                'Authorization': f'Bearer {auth_token}'
             }
         )
         if user_response.status_code == 401:
@@ -421,13 +422,12 @@ class JNClient:
 
     @staticmethod
     def create_jnc_user_data(auth_token: str, user_data: dict) -> JNCUserData:
-        subscription = user_data['currentSubscription']
         return JNCUserData(
             user_id=user_data['id'],
             user_name=user_data['username'],
             auth_token=auth_token,
             coins=user_data['coins'],
-            account_type=subscription['plan']['id'] if 'plan' in subscription else None
+            account_type=user_data['level']
         )
 
     @staticmethod
@@ -479,6 +479,7 @@ class JNClient:
             book_id=volume['legacyId'],
             title=volume['title'],
             title_slug=volume['slug'],
+            volume_id=volume['id'],
             volume_num=volume['number'],
             publish_date=volume['publishing'],
             updated_date=item.get('lastUpdated', None),
