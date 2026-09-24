@@ -1,7 +1,13 @@
-import csv
+"""
+J-Novel Labs API v2 client, data classes, and helpers for the jnc-downloader.
+
+This module talks to the JNC API and writes downloaded files, but never to the
+user: it contains no print or input calls. All console output and prompts live
+in jnc_ui.py and are driven by jnc.py.
+"""
 import os
 from datetime import datetime, timezone
-from typing import Dict, List, Set
+from typing import Dict, List
 
 import requests
 
@@ -43,7 +49,7 @@ class JNCBook:
     updated_date: datetime = None
     purchase_date: datetime = None
     download_link: str = None
-    price: int
+    price: int = 0
 
     def __init__(self, book_id: str, title: str, title_slug: str, volume_id: str, volume_num: int, publish_date: str, series_id: str,
                  series_slug: str, is_preorder: bool = None, is_owned: bool = None, updated_date: str = None,
@@ -60,29 +66,13 @@ class JNCBook:
         self.series_slug = series_slug
         self.is_owned = is_owned
         self.download_link = download_link
-        self._price = price
+        self.price = price
         if updated_date is not None:
             updated_date = updated_date.rstrip('Z').split('.')[0]
             self.updated_date = datetime.fromisoformat(updated_date).replace(tzinfo=timezone.utc)
         if purchase_date is not None:
             purchase_date = purchase_date.rstrip('Z').split('.')[0]
             self.purchase_date = datetime.fromisoformat(purchase_date).replace(tzinfo=timezone.utc)
-
-    @property
-    def price(self):
-        if self._price > 0:
-            return self._price
-        price_response = requests.get(
-            JNClient.FETCH_BOOK_PRICE_URL % self.title_slug,
-            headers={
-                'Accept': 'application/json',
-                'Content-Type': 'application/json',
-            }
-        )
-        if price_response.status_code != 200:
-            raise JNCApiError(str(price_response.status_code) + ': Book price not available.')
-        self._price = price_response.json()['coins']
-        return self._price
 
 
 class JNCSeries:
@@ -113,7 +103,7 @@ class JNCCoinOptions:
         current, original = packs[0]['currentCentsCost'], packs[0]['originalCentsCost']
         self.coinDiscount = int((1-current/original)*100)
 
-    def nearest_pack(self, amount) -> tuple[int, int]:
+    def nearest_pack(self, amount: int) -> tuple[int, int]:
         for pack in self.packs:
             if pack['coins'] > amount:
                 return pack['coins'], pack['currentCentsCost']
@@ -121,28 +111,7 @@ class JNCCoinOptions:
 
 
 class JNCUtils:
-    @staticmethod
-    def print_preorders(library: Dict[str, JNCBook]) -> None:
-        preorders = []
-        for book in library.values():
-            if book.is_preorder:
-                preorders.append(book)
-        if len(preorders):
-            print('\nCurrent preorders (Release Date / Title):')
-        for book in preorders:
-            print(f'{book.publish_date} {book.title}')
-
-    @staticmethod
-    def print_books(books: List[JNCBook]):
-        now = datetime.now(tz=timezone.utc)
-        for book in books:
-            availability = 'Preorder:' if now < book.publish_date else 'Available:'
-            print(f'({book.price} coins) {availability}\t{book.title}')
-
-    @staticmethod
-    def user_confirm(message: str) -> bool:
-        answer = input(message + ' (y/n)')
-        return True if answer == 'y' else False
+    """Book and series helpers plus epub downloads. No console I/O here; callers present results."""
 
     @staticmethod
     def sort_books(books: Dict[str, JNCBook]) -> Dict[str, JNCBook]:
@@ -152,13 +121,6 @@ class JNCUtils:
             key=lambda k: (books[k].series_slug or books[k].title_slug, books[k].volume_num)
         )
         return {book_id: books[book_id] for book_id in sorted_book_ids}
-
-    @staticmethod
-    def read_downloaded_books_file(csv_path: str) -> set:
-        """First column of the csv is expected to be the book id"""
-        with open(csv_path, mode='r', newline='') as f:
-            book_ids = set([row[0] for row in csv.reader(f, delimiter='\t')])
-        return book_ids
 
     @staticmethod
     def download_book(target_dir: str, book: JNCBook) -> None:
@@ -192,6 +154,20 @@ class JNCUtils:
         return result
 
     @staticmethod
+    def get_matching_series(known_series: List[str], search_term: str) -> List[str]:
+        """
+        Returns every known series slug that contains the search term.
+        The match is a case-insensitive substring match; the order of the
+        known series is preserved.
+
+        :param known_series: List of series title slugs to search
+        :param search_term: substring to search the slugs for
+        :return: List of matching series title slugs
+        """
+        lowered_term = search_term.lower()
+        return [series_slug for series_slug in known_series if lowered_term in series_slug.lower()]
+
+    @staticmethod
     def get_unowned_books(library: Dict[str, JNCBook], series_info: Dict[str, JNCSeries]) -> List[JNCBook]:
         """
         Returns a list of book ids that are not yet owned, but available
@@ -204,8 +180,24 @@ class JNCUtils:
         return result
 
     @staticmethod
+    def fetch_book_prices(books: List[JNCBook]) -> None:
+        """
+        Fetches the price (in coins) of every book that has no price yet and stores it on the book.
+        """
+        for book in books:
+            if book.price == 0:
+                book.price = JNClient.fetch_book_price(book.title_slug)
+
+    @staticmethod
     def unfollow_completed_series(downloaded_book_ids: List[str], series: Dict[str, JNCSeries],
-                                  series_follow_states: Dict[str, bool]) -> None:
+                                  series_follow_states: Dict[str, bool]) -> List[str]:
+        """
+        Unfollows (sets follow state to False) every fully translated series
+        whose volumes have all been downloaded.
+
+        :return: the slugs of the unfollowed series
+        """
+        unfollowed_series = []
         for serie in series.values():
             is_completed = True
             if 'fully translated' not in serie.tags:
@@ -215,65 +207,14 @@ class JNCUtils:
                     is_completed = False
                     break
             if is_completed:
-                print(f'{serie.slug} is fully owned and translated. Series will be unfollowed.')
                 series_follow_states[serie.slug] = False
-
-    @staticmethod
-    def process_library(library: Dict[str, JNCBook], downloaded_book_dates: Dict[str, datetime], target_dir: str,
-                        include_updated: bool = False) -> None:
-        now = datetime.now(tz=timezone.utc).replace(microsecond=0)
-        for book_id, book in library.items():
-            if book.is_preorder is True \
-                    or book.publish_date > now \
-                    or book.download_link is None \
-                    or book_id in downloaded_book_dates and not include_updated:
-                continue
-
-            if book_id not in downloaded_book_dates \
-                    or (include_updated
-                        and book.updated_date is not None
-                        and downloaded_book_dates[book_id] < book.updated_date):
-                try:
-                    print(f'Downloading: {book.title}')
-                    JNCUtils.download_book(target_dir=target_dir, book=book)
-                    downloaded_book_dates[book_id] = now
-                except JNCApiError as err:
-                    print(err)
-
-    @staticmethod
-    def handle_new_books(new_books: List[JNCBook], user_data: JNCUserData,
-                         buy_coins: bool = False, no_confirm_order: bool = False,
-                         no_confirm_coins: bool = False) -> Dict[str, JNCBook]:
-        """
-        :param no_confirm_coins:
-        :param no_confirm_order:
-        :param buy_coins:
-        :param user_data:
-        :param new_books: Limited information JNCBooks from series info
-        :return: dictionary {book_id: JNCBook} of ordered books
-        """
-        ordered_books = {}
-        for book in new_books:
-            print(f'You have {user_data.coins} coins')
-            if not no_confirm_order and not JNCUtils.user_confirm(f'Do you want to order {book.title}?'):
-                continue
-            if user_data.coins == 0 and buy_coins \
-                    and (no_confirm_coins or JNCUtils.user_confirm(f'Do you want to buy {book.price} coins?')):
-                print(f'Buying {book.price} coins')
-                JNClient.buy_coins(user_data=user_data, amount=book.price)
-            if user_data.coins < book.price:
-                print('Not enough coins, stopping order process!')
-                break
-            JNClient.order_book(book=book, user_data=user_data)
-            ordered_books[book.book_id] = JNClient.fetch_owned_book_info(auth_token=user_data.auth_token,
-                                                                         volume_id=book.volume_id)
-            print(f'Ordered: {book.title}\n')
-        return ordered_books
+                unfollowed_series.append(serie.slug)
+        return unfollowed_series
 
 
 class JNClient:
     """
-    Colletion of methods to talk to the JNC API
+    Collection of methods to talk to the JNC API
 
     Partial reference:
     https://forums.j-novel.club/topic/4370/developer-psa-current-epub-download-links-will-be-replaced-soon
@@ -408,6 +349,20 @@ class JNClient:
         return JNCCoinOptions(resp['coinPriceInCents'], resp['purchaseMinimumCoins'], resp['purchaseMaximumCoins'], resp['packs'])
 
     @staticmethod
+    def fetch_book_price(title_slug: str) -> int:
+        """Fetch the price of a single volume in coins."""
+        price_response = requests.get(
+            JNClient.FETCH_BOOK_PRICE_URL % title_slug,
+            headers={
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+            }
+        )
+        if price_response.status_code != 200:
+            raise JNCApiError(str(price_response.status_code) + ': Book price not available.')
+        return price_response.json()['coins']
+
+    @staticmethod
     def fetch_payment_method_id(auth_token: str) -> int:
         payment_method_response = requests.get(
             JNClient.PAYMENT_METHOD_URL,
@@ -492,10 +447,11 @@ class JNClient:
         )
 
     @staticmethod
-    def buy_coins(user_data: JNCUserData, amount: int) -> None:
+    def buy_coins(user_data: JNCUserData, amount: int) -> str:
         """
         Buy coins on JNC.
 
+        :return: the API response message, e.g. the purchase confirmation, for display
         :raises ArgumentError   when amount is out of range
         :raises JNCApiError     when the purchase request fails for any reason
         """
@@ -526,8 +482,8 @@ class JNClient:
         if response.status_code == 200 and resp['ok'] == False:
             message = resp['message']
             raise JNCApiError(f'Could not purchase coins: {message}')
-        print(resp['message'])
         user_data.coins += amount
+        return resp['message']
 
 class JNCApiError(Exception):
     pass

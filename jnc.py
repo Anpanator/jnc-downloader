@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-from __future__ import print_function
+import sys
+
+# The version check must run before the other imports: jnc_api_tools uses
+# builtin-generic annotations and fails to import on Python < 3.9.
+MIN_PYTHON = (3, 9)
+assert sys.version_info >= MIN_PYTHON, f'requires Python {".".join([str(n) for n in MIN_PYTHON])} or newer'
 
 import csv
 import os
-import sys
 from argparse import ArgumentParser
-from datetime import datetime
-from getpass import getpass
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 
-from jnc_api_tools import JNCUnauthorizedError, JNClient, JNCApiError, JNCUtils
-
-MIN_PYTHON = (3, 7)
-assert sys.version_info >= MIN_PYTHON, f'requires Python {".".join([str(n) for n in MIN_PYTHON])} or newer'
+from jnc_api_tools import JNCBook, JNCUserData, JNCApiError, JNClient, JNCUnauthorizedError, JNCUtils
+from jnc_ui import JNCConsoleUI
 
 # Config: START
 # override with ENV vars, e.g. JNC_DOWNLOAD_TARGET_DIR="~/Documents/" ./jnc.py --order
@@ -75,10 +77,25 @@ parser.add_argument("--no-confirm-series-follow",
                     default=False,
                     help="Disable user confirmation for following new series."
                     )
+parser.add_argument("--unfollow",
+                    dest="unfollow",
+                    metavar="SEARCH",
+                    default=None,
+                    help="Unfollows a series and exits. SEARCH is matched against your known series slugs (case-insensitive substring); if it matches several series, you are asked which one to unfollow. Unfollowed series are not checked for new volumes anymore."
+                    )
+parser.add_argument("--delete-token",
+                    dest="delete_token",
+                    action='store_const',
+                    const=True,
+                    default=False,
+                    help="Deletes the stored JNC API token (logs this script out) and exits. The next run will ask you to log in again."
+                    )
 args = parser.parse_args()
 enable_order_books = args.order
 enable_buy_coins = args.coins
 update_books = args.update_books
+unfollow_search = args.unfollow
+delete_token = args.delete_token
 no_confirm_order = args.no_confirm_all or args.no_confirm_order
 no_confirm_series = args.no_confirm_all or args.no_confirm_series
 no_confirm_coins = args.no_confirm_all or args.no_confirm_coins
@@ -120,6 +137,142 @@ try:
 except FileNotFoundError:
     jnc_token = None
 
+ui = JNCConsoleUI()
+
+
+def handle_new_books(ui: JNCConsoleUI, new_books: List[JNCBook],
+                     user_data: JNCUserData, buy_coins: bool = False,
+                     no_confirm_order: bool = False,
+                     no_confirm_coins: bool = False) -> Dict[str, JNCBook]:
+    """
+    Interactively order the given new books, buying coins first when enabled and confirmed.
+
+    :param ui: console UI for all prompts and status output
+    :param new_books: books from series info that are not owned yet
+    :param user_data: current user; the coin balance is updated in place
+    :param buy_coins: allow a coin purchase when the balance is too low
+    :param no_confirm_order: order each book without asking
+    :param no_confirm_coins: buy coins without asking
+    :return: dictionary {book_id: JNCBook} of ordered books
+    """
+    ordered_books = {}
+    for book in new_books:
+        ui.info(f'You have {user_data.coins} coins')
+        if not no_confirm_order and not ui.confirm(f'Do you want to order {book.title}?'):
+            continue
+        if user_data.coins == 0 and buy_coins \
+                and (no_confirm_coins or ui.confirm(f'Do you want to buy {book.price} coins?')):
+            ui.info(f'Buying {book.price} coins')
+            buy_message = JNClient.buy_coins(user_data=user_data, amount=book.price)
+            ui.info(buy_message)
+        if user_data.coins < book.price:
+            ui.error('Not enough coins, stopping order process!')
+            break
+        JNClient.order_book(book=book, user_data=user_data)
+        ordered_books[book.book_id] = JNClient.fetch_owned_book_info(
+            auth_token=user_data.auth_token,
+            volume_id=book.volume_id)
+        ui.info(f'Ordered: {book.title}\n')
+    return ordered_books
+
+
+def process_library(ui: JNCConsoleUI, library: Dict[str, JNCBook],
+                    downloaded_book_dates: Dict[str, datetime],
+                    target_dir: str, include_updated: bool = False) -> None:
+    """
+    Download every library book that is due for download.
+
+    Skips preorders, books that are not published yet, books without a download
+    link, and already downloaded books. With include_updated, books whose
+    updated_date is newer than the recorded download date are downloaded again.
+    Prints per-book progress and a final summary so long download runs can be
+    tracked.
+    """
+    now = datetime.now(tz=timezone.utc).replace(microsecond=0)
+    due_books = []
+    for book_id, book in library.items():
+        if book.is_preorder is True \
+                or book.publish_date > now \
+                or book.download_link is None \
+                or book_id in downloaded_book_dates and not include_updated:
+            continue
+
+        if book_id not in downloaded_book_dates \
+                or (include_updated
+                    and book.updated_date is not None
+                    and downloaded_book_dates[book_id] < book.updated_date):
+            due_books.append((book_id, book))
+
+    due_count = len(due_books)
+    downloaded_count = 0
+    for download_index, (book_id, book) in enumerate(due_books, start=1):
+        try:
+            ui.info(f'Downloading ({download_index}/{due_count}): {book.title}')
+            JNCUtils.download_book(target_dir=target_dir, book=book)
+            downloaded_book_dates[book_id] = now
+            downloaded_count += 1
+        except JNCApiError as err:
+            ui.error(str(err))
+
+    if due_count:
+        ui.info(f'Downloaded {downloaded_count} of {due_count} books.')
+
+
+def handle_unfollow(ui: JNCConsoleUI, series_follow_states: Dict[str, bool],
+                    search_term: str) -> Optional[str]:
+    """
+    Interactively resolve the --unfollow search term to one series and mark it unfollowed.
+
+    The known series slugs are searched for a case-insensitive substring of the
+    search term. A single match is unfollowed right away; with more matches the
+    user picks one from a numbered list (or cancels).
+
+    :param ui: console UI for all prompts and status output
+    :param series_follow_states: known series slugs mapped to their follow state;
+                                 the chosen series is set to False in place
+    :param search_term: substring to search the series slugs for
+    :return: the slug of the unfollowed series, or None when nothing matched
+             or the user cancelled the choice
+    """
+    matches = JNCUtils.get_matching_series([*series_follow_states], search_term)
+    if not matches:
+        ui.error(f'No series matching "{search_term}" found.')
+        return None
+    if len(matches) == 1:
+        series_slug = matches[0]
+    else:
+        ui.info(f'{len(matches)} series match "{search_term}":')
+        series_slug = ui.prompt_choice('Which series do you want to unfollow?', matches)
+        if series_slug is None:
+            ui.info('Unfollow cancelled.')
+            return None
+    series_follow_states[series_slug] = False
+    ui.info(f'Unfollowed {series_slug}. It will no longer be checked for new volumes.')
+    return series_slug
+
+
+# One-off maintenance commands: they only touch local state, skip the whole
+# download flow, and exit before any JNC API call or login prompt.
+if unfollow_search is not None:
+    unfollowed_slug = handle_unfollow(ui=ui, series_follow_states=series_follow_states,
+                                      search_term=unfollow_search)
+    if unfollowed_slug is not None:
+        with open(owned_series_file, mode='w', newline='') as f:
+            series_csv_writer = csv.writer(f, delimiter='\t')
+            series_csv_writer.writerows(series_follow_states.items())
+
+if delete_token:
+    try:
+        os.remove(token_file)
+    except FileNotFoundError:
+        ui.info(f'No stored API token found at {token_file}')
+    else:
+        ui.info(f'Deleted the stored API token: {token_file}')
+
+if unfollow_search is not None or delete_token:
+    sys.exit(0)
+
+
 user_data = None
 try:
     if jnc_token is not None:
@@ -131,19 +284,18 @@ if user_data is None and login_email and login_pw:
     try:
         user_data = JNClient.login(login_email, login_pw)
     except JNCApiError as e:
-        print(e)
+        ui.error(str(e))
 
 while user_data is None:
     try:
-        login = input('Enter login email: ')
-        password = getpass()
+        login, password = ui.prompt_login()
         user_data = JNClient.login(login, password)
     except JNCApiError as e:
-        print(e)
+        ui.error(str(e))
 
-print(f'You have {user_data.coins} coins.')
-if user_data.coin_discount:
-    print(f'You can buy coins at a {user_data.coin_discount}% discount.')
+ui.show_coin_balance(user_data)
+
+ui.info('Fetching your library...')
 library = JNClient.fetch_library(user_data.auth_token)
 
 """
@@ -160,20 +312,27 @@ if csv_is_legacy_format:
 
 new_series = JNCUtils.get_new_series(library=library, known_series=[*series_follow_states])
 for series_slug in new_series:
-    follow_new = no_confirm_series or JNCUtils.user_confirm(f'{series_slug} is a new series. Do you want to follow it?')
+    follow_new = no_confirm_series or ui.confirm(f'{series_slug} is a new series. Do you want to follow it?')
     series_follow_states[series_slug] = follow_new
     if follow_new:
         followed_series.append(series_slug)
 
+series_info = {}
+series_total = len(followed_series)
+for series_index, series_slug in enumerate(followed_series, start=1):
+    ui.info(f'Fetching series info ({series_index}/{series_total}): {series_slug}')
+    series_info |= JNClient.fetch_series([series_slug])
 
-series_info = JNClient.fetch_series(followed_series)
 new_books = JNCUtils.get_unowned_books(library=library, series_info=series_info)
 new_book_cnt = len(new_books)
-print(f'There are {new_book_cnt} new volumes available:')
+for price_index, book in enumerate(new_books, start=1):
+    ui.info(f'Fetching book price ({price_index}/{new_book_cnt}): {book.title}')
+    JNCUtils.fetch_book_prices([book])
+ui.info(f'There are {new_book_cnt} new volumes available:')
 total_price = 0
 for book in new_books:
     total_price += book.price
-JNCUtils.print_books(new_books)
+ui.show_new_books(new_books)
 missing_coins = total_price - user_data.coins
 if enable_order_books:
     coin_opts = JNClient.fetch_coin_options(user_data.auth_token)
@@ -182,7 +341,7 @@ if enable_order_books:
     if (missing_coins > 0) \
             and enable_buy_coins \
             and (no_confirm_coins
-                 or JNCUtils.user_confirm(
+                 or ui.confirm(
                     f'{new_book_cnt} new books available. It will cost '
                     f'{total_price} coins to purchase them all. You have '
                     f'{user_data.coins} coins available. Purchase '
@@ -190,12 +349,13 @@ if enable_order_books:
             )):
         while purchase_coins > 0:
             buy_amount = min(coin_opts.purchaseMaximumCoins, purchase_coins)
-            print(f'Buying {buy_amount} coins')
-            JNClient.buy_coins(user_data=user_data, amount=buy_amount)
+            ui.info(f'Buying {buy_amount} coins')
+            buy_message = JNClient.buy_coins(user_data=user_data, amount=buy_amount)
+            ui.info(buy_message)
             purchase_coins -= buy_amount
 
-
-    ordered_books = JNCUtils.handle_new_books(
+    ordered_books = handle_new_books(
+        ui=ui,
         new_books=new_books,
         user_data=user_data,
         buy_coins=enable_buy_coins,
@@ -205,20 +365,23 @@ if enable_order_books:
 
 library = JNCUtils.sort_books(library)
 
-JNCUtils.print_preorders(library)
+ui.show_preorders(library)
 
-JNCUtils.process_library(
+process_library(
+    ui=ui,
     library=library,
     downloaded_book_dates=downloaded_books_dates,
     target_dir=download_target_dir,
     include_updated=update_books
 )
 
-JNCUtils.unfollow_completed_series(
+unfollowed_series = JNCUtils.unfollow_completed_series(
     downloaded_book_ids=[*downloaded_books_dates],
     series=series_info,
     series_follow_states=series_follow_states
 )
+for series_slug in unfollowed_series:
+    ui.info(f'{series_slug} is fully owned and translated. Series will be unfollowed.')
 
 with open(token_file, mode='w', newline='') as f:
     f.write(user_data.auth_token)

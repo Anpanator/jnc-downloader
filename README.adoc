@@ -10,6 +10,8 @@ Use `--update-books` to also download updated epubs.
 Note that when running this for the first time and used versions <= 2.5.1 of this tool, it may re-download a large portion of your library.
 
 It will also ask you if you want to follow series it does not know about yet and print avaliable volumes you don't own of series you follow.
+Use `--unfollow SEARCH` to stop following a series: SEARCH is matched against the slugs of your known series (case-insensitive substring) and if several series match, you are asked which one to unfollow.
+Unfollowed series are then no longer checked for new volumes.
 
 The script optionally supports auto order of books and auto purchase of J-Novel coins.
 For details about this, refer to the output of `python3 jnc.py --help`
@@ -19,5 +21,14 @@ It only work if you have an account directly with J-Novel.club. If you log in us
 
 == Security considerations
 The script will store your JNC access token on disk. Your email/password *will not* be stored.
+Use `--delete-token` to remove the stored token from disk again, e.g. when you are done using the script on a machine.
 This means any program running as root or with your user will be, in principle, able to access those credentials and access your JNC account.
 Whether or not you are comfortable with this is up to you.
+
+== Development
+
+The test suite uses only the Python standard library; run it from the repository root with:
+
+    python3 -m unittest
+
+The tests mock the JNC API, so they need no credentials, spend no coins, and download nothing.
