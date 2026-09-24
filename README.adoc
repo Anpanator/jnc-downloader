@@ -21,3 +21,11 @@ It only work if you have an account directly with J-Novel.club. If you log in us
 The script will store your JNC access token on disk. Your email/password *will not* be stored.
 This means any program running as root or with your user will be, in principle, able to access those credentials and access your JNC account.
 Whether or not you are comfortable with this is up to you.
+
+== Development
+
+The test suite uses only the Python standard library; run it from the repository root with:
+
+    python3 -m unittest
+
+The tests mock the JNC API, so they need no credentials, spend no coins, and download nothing.
