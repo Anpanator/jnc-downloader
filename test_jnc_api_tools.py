@@ -111,6 +111,20 @@ class JNCUtilsGetNewSeriesTests(unittest.TestCase):
                          JNCUtils.get_new_series(library, known_series=['known-series']))
 
 
+class JNCUtilsGetMatchingSeriesTests(unittest.TestCase):
+    def test_matches_slugs_containing_the_term_case_insensitively(self) -> None:
+        known = ['ascension', 'magic-2', 'other']
+        self.assertEqual(['ascension'], JNCUtils.get_matching_series(known, 'ASC'))
+
+    def test_returns_substring_matches_in_order(self) -> None:
+        known = ['blade-of-justice', 'justice-king', 'blades-of-glory']
+        self.assertEqual(['blade-of-justice', 'blades-of-glory'],
+                         JNCUtils.get_matching_series(known, 'blade'))
+
+    def test_returns_nothing_without_a_match(self) -> None:
+        self.assertEqual([], JNCUtils.get_matching_series(['ascension'], 'zzz'))
+
+
 class JNCUtilsGetUnownedBooksTests(unittest.TestCase):
     def test_returns_volumes_missing_from_the_library(self) -> None:
         volume_one = make_book('B1', 'Vol 1')

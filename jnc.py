@@ -10,7 +10,7 @@ import csv
 import os
 from argparse import ArgumentParser
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from jnc_api_tools import JNCBook, JNCUserData, JNCApiError, JNClient, JNCUnauthorizedError, JNCUtils
 from jnc_ui import JNCConsoleUI
@@ -77,10 +77,25 @@ parser.add_argument("--no-confirm-series-follow",
                     default=False,
                     help="Disable user confirmation for following new series."
                     )
+parser.add_argument("--unfollow",
+                    dest="unfollow",
+                    metavar="SEARCH",
+                    default=None,
+                    help="Unfollows a series and exits. SEARCH is matched against your known series slugs (case-insensitive substring); if it matches several series, you are asked which one to unfollow. Unfollowed series are not checked for new volumes anymore."
+                    )
+parser.add_argument("--delete-token",
+                    dest="delete_token",
+                    action='store_const',
+                    const=True,
+                    default=False,
+                    help="Deletes the stored JNC API token (logs this script out) and exits. The next run will ask you to log in again."
+                    )
 args = parser.parse_args()
 enable_order_books = args.order
 enable_buy_coins = args.coins
 update_books = args.update_books
+unfollow_search = args.unfollow
+delete_token = args.delete_token
 no_confirm_order = args.no_confirm_all or args.no_confirm_order
 no_confirm_series = args.no_confirm_all or args.no_confirm_series
 no_confirm_coins = args.no_confirm_all or args.no_confirm_coins
@@ -201,6 +216,61 @@ def process_library(ui: JNCConsoleUI, library: Dict[str, JNCBook],
 
     if due_count:
         ui.info(f'Downloaded {downloaded_count} of {due_count} books.')
+
+
+def handle_unfollow(ui: JNCConsoleUI, series_follow_states: Dict[str, bool],
+                    search_term: str) -> Optional[str]:
+    """
+    Interactively resolve the --unfollow search term to one series and mark it unfollowed.
+
+    The known series slugs are searched for a case-insensitive substring of the
+    search term. A single match is unfollowed right away; with more matches the
+    user picks one from a numbered list (or cancels).
+
+    :param ui: console UI for all prompts and status output
+    :param series_follow_states: known series slugs mapped to their follow state;
+                                 the chosen series is set to False in place
+    :param search_term: substring to search the series slugs for
+    :return: the slug of the unfollowed series, or None when nothing matched
+             or the user cancelled the choice
+    """
+    matches = JNCUtils.get_matching_series([*series_follow_states], search_term)
+    if not matches:
+        ui.error(f'No series matching "{search_term}" found.')
+        return None
+    if len(matches) == 1:
+        series_slug = matches[0]
+    else:
+        ui.info(f'{len(matches)} series match "{search_term}":')
+        series_slug = ui.prompt_choice('Which series do you want to unfollow?', matches)
+        if series_slug is None:
+            ui.info('Unfollow cancelled.')
+            return None
+    series_follow_states[series_slug] = False
+    ui.info(f'Unfollowed {series_slug}. It will no longer be checked for new volumes.')
+    return series_slug
+
+
+# One-off maintenance commands: they only touch local state, skip the whole
+# download flow, and exit before any JNC API call or login prompt.
+if unfollow_search is not None:
+    unfollowed_slug = handle_unfollow(ui=ui, series_follow_states=series_follow_states,
+                                      search_term=unfollow_search)
+    if unfollowed_slug is not None:
+        with open(owned_series_file, mode='w', newline='') as f:
+            series_csv_writer = csv.writer(f, delimiter='\t')
+            series_csv_writer.writerows(series_follow_states.items())
+
+if delete_token:
+    try:
+        os.remove(token_file)
+    except FileNotFoundError:
+        ui.info(f'No stored API token found at {token_file}')
+    else:
+        ui.info(f'Deleted the stored API token: {token_file}')
+
+if unfollow_search is not None or delete_token:
+    sys.exit(0)
 
 
 user_data = None

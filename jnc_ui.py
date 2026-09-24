@@ -7,7 +7,7 @@ them into output and prompts, and jnc.py drives the interaction.
 """
 from datetime import datetime, timezone
 from getpass import getpass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from jnc_api_tools import JNCBook, JNCUserData
 
@@ -33,6 +33,23 @@ class JNCConsoleUI:
         login = input('Enter login email: ')
         password = getpass()
         return login, password
+
+    def prompt_choice(self, message: str, options: List[str]) -> Optional[str]:
+        """
+        Print the options with their numbers and let the user pick one by number.
+
+        Returns the chosen option, or None when the user cancels with 0.
+        Answers that are no valid option number are asked again.
+        """
+        for option_index, option in enumerate(options, start=1):
+            print(f'({option_index}) {option}')
+        while True:
+            answer = input(f'{message} (1-{len(options)}, 0 to cancel)')
+            if answer == '0':
+                return None
+            if answer.isdigit() and 1 <= int(answer) <= len(options):
+                return options[int(answer) - 1]
+            self.error(f'Please enter a number between 1 and {len(options)}, or 0 to cancel.')
 
     def show_coin_balance(self, user_data: JNCUserData) -> None:
         """Print the current coin balance, plus the coin discount when there is one."""

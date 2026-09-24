@@ -42,6 +42,31 @@ class JNCConsoleUITests(unittest.TestCase):
         input_mock.assert_called_once_with('Enter login email: ')
         getpass_mock.assert_called_once_with()
 
+    def test_prompt_choice_prints_options_and_returns_the_chosen_one(self) -> None:
+        with mock.patch('builtins.input', return_value='2') as input_mock:
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                chosen = self.ui.prompt_choice('Which series?', ['slug-a', 'slug-b'])
+        self.assertEqual('slug-b', chosen)
+        self.assertEqual('(1) slug-a\n(2) slug-b\n', out.getvalue())
+        input_mock.assert_called_once_with('Which series? (1-2, 0 to cancel)')
+
+    def test_prompt_choice_cancel_returns_none(self) -> None:
+        with mock.patch('builtins.input', return_value='0') as input_mock:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertIsNone(self.ui.prompt_choice('Which series?', ['slug-a', 'slug-b']))
+        input_mock.assert_called_once_with('Which series? (1-2, 0 to cancel)')
+
+    def test_prompt_choice_asks_again_on_invalid_answers(self) -> None:
+        for answer in ('', 'x', '3', '-1'):
+            with self.subTest(answer=answer):
+                with mock.patch('builtins.input', side_effect=[answer, '1']) as input_mock:
+                    with contextlib.redirect_stdout(io.StringIO()) as out:
+                        chosen = self.ui.prompt_choice('Which series?', ['slug-a'])
+                self.assertEqual('slug-a', chosen)
+                self.assertEqual(2, input_mock.call_count)
+                self.assertIn('Please enter a number between 1 and 1, or 0 to cancel.',
+                              out.getvalue())
+
     def test_show_coin_balance_prints_the_discount_when_there_is_one(self) -> None:
         user = JNCUserData('u1', 'tester', 'tok', 42, 'PREMIUM')
         self.assertEqual('You have 42 coins.\nYou can buy coins at a 15% discount.\n',

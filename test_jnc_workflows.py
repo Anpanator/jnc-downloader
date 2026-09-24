@@ -207,5 +207,52 @@ class ProcessLibraryTests(unittest.TestCase):
             self.ui.infos)
 
 
+class HandleUnfollowTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.handle_unfollow = WORKFLOWS['handle_unfollow']
+
+    def test_unfollows_the_only_match_without_asking(self) -> None:
+        ui = FakeConsoleUI()
+        states = {'ascension': True}
+        unfollowed = self.handle_unfollow(ui=ui, series_follow_states=states, search_term='ASC')
+        self.assertEqual('ascension', unfollowed)
+        self.assertFalse(states['ascension'])
+        self.assertEqual([], ui.choice_prompts)
+        self.assertIn('Unfollowed ascension. It will no longer be checked for new volumes.', ui.infos)
+
+    def test_reports_an_error_and_unfollows_nothing_without_a_match(self) -> None:
+        ui = FakeConsoleUI()
+        states = {'ascension': True}
+        unfollowed = self.handle_unfollow(ui=ui, series_follow_states=states, search_term='zzz')
+        self.assertIsNone(unfollowed)
+        self.assertTrue(states['ascension'])
+        self.assertEqual(['No series matching "zzz" found.'], ui.errors)
+        self.assertEqual([], ui.choice_prompts)
+
+    def test_asks_for_a_choice_between_multiple_matches(self) -> None:
+        ui = FakeConsoleUI(choice_answers=['magic-2'])
+        states = {'magic-1': True, 'magic-2': True, 'other': True}
+        unfollowed = self.handle_unfollow(ui=ui, series_follow_states=states, search_term='MAGIC')
+        self.assertEqual('magic-2', unfollowed)
+        self.assertFalse(states['magic-2'])
+        self.assertTrue(states['magic-1'])
+        self.assertTrue(states['other'])
+        self.assertEqual([('Which series do you want to unfollow?', ['magic-1', 'magic-2'])],
+                         ui.choice_prompts)
+        self.assertIn('2 series match "MAGIC":', ui.infos)
+        self.assertIn('Unfollowed magic-2. It will no longer be checked for new volumes.', ui.infos)
+
+    def test_a_cancelled_choice_unfollows_nothing(self) -> None:
+        ui = FakeConsoleUI(choice_answers=[None])
+        states = {'magic-1': True, 'magic-2': True}
+        unfollowed = self.handle_unfollow(ui=ui, series_follow_states=states, search_term='magic')
+        self.assertIsNone(unfollowed)
+        self.assertTrue(states['magic-1'])
+        self.assertTrue(states['magic-2'])
+        self.assertIn('Unfollow cancelled.', ui.infos)
+        self.assertNotIn('Unfollowed magic-1. It will no longer be checked for new volumes.', ui.infos)
+        self.assertNotIn('Unfollowed magic-2. It will no longer be checked for new volumes.', ui.infos)
+
+
 if __name__ == '__main__':
     unittest.main()

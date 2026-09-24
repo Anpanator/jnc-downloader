@@ -10,7 +10,7 @@ so the workflow functions are pulled out of jnc.py's source via ast instead
 import ast
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from jnc_api_tools import JNCBook, JNCApiError, JNClient, JNCUserData, JNCUtils
 from jnc_ui import JNCConsoleUI
@@ -44,12 +44,15 @@ class FakeResponse:
 class FakeConsoleUI(JNCConsoleUI):
     """JNCConsoleUI stand-in that records output instead of printing it."""
 
-    def __init__(self, confirm_answers: Optional[List[bool]] = None) -> None:
+    def __init__(self, confirm_answers: Optional[List[bool]] = None,
+                 choice_answers: Optional[List[Optional[str]]] = None) -> None:
         super().__init__()
         self.infos: List[str] = []
         self.errors: List[str] = []
         self.confirms: List[str] = []
+        self.choice_prompts: List[Tuple[str, List[str]]] = []
         self._confirm_answers = iter(confirm_answers or [])
+        self._choice_answers = iter(choice_answers or [])
 
     def info(self, message: str) -> None:
         self.infos.append(message)
@@ -60,6 +63,10 @@ class FakeConsoleUI(JNCConsoleUI):
     def confirm(self, message: str) -> bool:
         self.confirms.append(message)
         return next(self._confirm_answers, False)
+
+    def prompt_choice(self, message: str, options: List[str]) -> Optional[str]:
+        self.choice_prompts.append((message, options))
+        return next(self._choice_answers, None)
 
 
 def api_volume(book_id: str, title: str, title_slug: str, volume_id: str, number: int, publishing: str) -> dict:
@@ -134,15 +141,16 @@ def load_workflow_functions() -> Dict[str, Callable]:
 
     jnc.py runs its whole flow at module top level, so it must never be
     imported by tests. Instead its source is parsed and only the
-    handle_new_books/process_library definitions are compiled and executed
-    in a controlled namespace.
+    handle_new_books/process_library/handle_unfollow definitions are compiled
+    and executed in a controlled namespace.
     """
     tree = ast.parse(JNC_SOURCE, filename='jnc.py')
     wanted = [node for node in tree.body
               if isinstance(node, ast.FunctionDef)
-              and node.name in ('handle_new_books', 'process_library')]
-    if {node.name for node in wanted} != {'handle_new_books', 'process_library'}:
-        raise AssertionError('jnc.py no longer defines handle_new_books and process_library at top level')
+              and node.name in ('handle_new_books', 'process_library', 'handle_unfollow')]
+    if {node.name for node in wanted} != {'handle_new_books', 'process_library', 'handle_unfollow'}:
+        raise AssertionError('jnc.py no longer defines handle_new_books, process_library, '
+                             'and handle_unfollow at top level')
     namespace: Dict[str, Any] = {
         'JNCBook': JNCBook,
         'JNCUserData': JNCUserData,
@@ -152,6 +160,7 @@ def load_workflow_functions() -> Dict[str, Callable]:
         'JNCConsoleUI': JNCConsoleUI,
         'Dict': Dict,
         'List': List,
+        'Optional': Optional,
         'datetime': datetime,
         'timezone': timezone,
     }

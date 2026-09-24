@@ -154,6 +154,20 @@ class JNCUtils:
         return result
 
     @staticmethod
+    def get_matching_series(known_series: List[str], search_term: str) -> List[str]:
+        """
+        Returns every known series slug that contains the search term.
+        The match is a case-insensitive substring match; the order of the
+        known series is preserved.
+
+        :param known_series: List of series title slugs to search
+        :param search_term: substring to search the slugs for
+        :return: List of matching series title slugs
+        """
+        lowered_term = search_term.lower()
+        return [series_slug for series_slug in known_series if lowered_term in series_slug.lower()]
+
+    @staticmethod
     def get_unowned_books(library: Dict[str, JNCBook], series_info: Dict[str, JNCSeries]) -> List[JNCBook]:
         """
         Returns a list of book ids that are not yet owned, but available
