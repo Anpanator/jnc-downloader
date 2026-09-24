@@ -135,7 +135,7 @@ class ProcessLibraryTests(unittest.TestCase):
         self.assertEqual(timezone.utc, recorded.tzinfo)
         self.assertEqual(0, recorded.microsecond)
         self.assertEqual(datetime.now(tz=timezone.utc).date(), recorded.date())
-        self.assertEqual(['Downloading: Book One'], self.ui.infos)
+        self.assertEqual(['Downloading (1/1): Book One', 'Downloaded 1 of 1 books.'], self.ui.infos)
 
     def test_skips_preorders(self) -> None:
         book = make_book('B1', 'Future Book', is_preorder=True, download_link='https://dl.example/f.epub')
@@ -159,6 +159,7 @@ class ProcessLibraryTests(unittest.TestCase):
         download_book = self.run_process_library({'B1': book}, dates)
         download_book.assert_not_called()
         self.assertEqual(datetime(2020, 1, 1, tzinfo=timezone.utc), dates['B1'])
+        self.assertEqual([], self.ui.infos)
 
     def test_redownloads_updated_books_when_requested(self) -> None:
         book = make_book('B1', 'Book One', download_link='https://dl.example/book-one.epub',
@@ -188,7 +189,22 @@ class ProcessLibraryTests(unittest.TestCase):
              mock.call(target_dir=self.target_dir, book=good)],
             download_book.call_args_list)
         self.assertEqual(['404: Book not available.'], self.ui.errors)
+        self.assertEqual(
+            ['Downloading (1/2): Bad Book', 'Downloading (2/2): Good Book',
+             'Downloaded 1 of 2 books.'],
+            self.ui.infos)
         self.assertEqual(['B2'], list(dates))
+
+    def test_shows_download_progress_for_every_due_book(self) -> None:
+        library = {f'B{i}': make_book(f'B{i}', f'Book {i}', volume_num=i,
+                                      download_link=f'https://dl.example/b{i}.epub')
+                   for i in (1, 2, 3)}
+        download_book = self.run_process_library(library, {})
+        self.assertEqual(3, download_book.call_count)
+        self.assertEqual(
+            [f'Downloading ({i}/3): Book {i}' for i in (1, 2, 3)]
+            + ['Downloaded 3 of 3 books.'],
+            self.ui.infos)
 
 
 if __name__ == '__main__':

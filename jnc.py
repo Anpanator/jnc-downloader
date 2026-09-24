@@ -170,8 +170,11 @@ def process_library(ui: JNCConsoleUI, library: Dict[str, JNCBook],
     Skips preorders, books that are not published yet, books without a download
     link, and already downloaded books. With include_updated, books whose
     updated_date is newer than the recorded download date are downloaded again.
+    Prints per-book progress and a final summary so long download runs can be
+    tracked.
     """
     now = datetime.now(tz=timezone.utc).replace(microsecond=0)
+    due_books = []
     for book_id, book in library.items():
         if book.is_preorder is True \
                 or book.publish_date > now \
@@ -183,12 +186,21 @@ def process_library(ui: JNCConsoleUI, library: Dict[str, JNCBook],
                 or (include_updated
                     and book.updated_date is not None
                     and downloaded_book_dates[book_id] < book.updated_date):
-            try:
-                ui.info(f'Downloading: {book.title}')
-                JNCUtils.download_book(target_dir=target_dir, book=book)
-                downloaded_book_dates[book_id] = now
-            except JNCApiError as err:
-                ui.error(str(err))
+            due_books.append((book_id, book))
+
+    due_count = len(due_books)
+    downloaded_count = 0
+    for download_index, (book_id, book) in enumerate(due_books, start=1):
+        try:
+            ui.info(f'Downloading ({download_index}/{due_count}): {book.title}')
+            JNCUtils.download_book(target_dir=target_dir, book=book)
+            downloaded_book_dates[book_id] = now
+            downloaded_count += 1
+        except JNCApiError as err:
+            ui.error(str(err))
+
+    if due_count:
+        ui.info(f'Downloaded {downloaded_count} of {due_count} books.')
 
 
 user_data = None
@@ -212,6 +224,8 @@ while user_data is None:
         ui.error(str(e))
 
 ui.show_coin_balance(user_data)
+
+ui.info('Fetching your library...')
 library = JNClient.fetch_library(user_data.auth_token)
 
 """
@@ -233,11 +247,17 @@ for series_slug in new_series:
     if follow_new:
         followed_series.append(series_slug)
 
+series_info = {}
+series_total = len(followed_series)
+for series_index, series_slug in enumerate(followed_series, start=1):
+    ui.info(f'Fetching series info ({series_index}/{series_total}): {series_slug}')
+    series_info |= JNClient.fetch_series([series_slug])
 
-series_info = JNClient.fetch_series(followed_series)
 new_books = JNCUtils.get_unowned_books(library=library, series_info=series_info)
-JNCUtils.fetch_book_prices(new_books)
 new_book_cnt = len(new_books)
+for price_index, book in enumerate(new_books, start=1):
+    ui.info(f'Fetching book price ({price_index}/{new_book_cnt}): {book.title}')
+    JNCUtils.fetch_book_prices([book])
 ui.info(f'There are {new_book_cnt} new volumes available:')
 total_price = 0
 for book in new_books:

@@ -231,8 +231,11 @@ class JncScriptTests(unittest.TestCase):
 
             self.assertIn('You have 42 coins.', run.stdout)
             self.assertIn('You can buy coins at a 15% discount.', run.stdout)
+            self.assertIn('Fetching your library...', run.stdout)
+            self.assertIn('Fetching series info (1/1): my-series', run.stdout)
             self.assertIn('There are 0 new volumes available:', run.stdout)
-            self.assertIn('Downloading: Book One', run.stdout)
+            self.assertIn('Downloading (1/1): Book One', run.stdout)
+            self.assertIn('Downloaded 1 of 1 books.', run.stdout)
             self.assertIn('Current preorders (Release Date / Title):', run.stdout)
             self.assertIn('Future Book', run.stdout)
             self.assertEqual(b'one-epub', sandbox.epub_path('book-one').read_bytes())
@@ -262,7 +265,7 @@ class JncScriptTests(unittest.TestCase):
             )
             run2 = run_jnc_script(api2, sandbox, argv=[], env_login=False)
             self.assertEqual([], api2.downloaded_urls)
-            self.assertNotIn('Downloading:', run2.stdout)
+            self.assertNotIn('Downloading', run2.stdout)
 
     def test_legacy_csv_dates_are_upgraded_to_purchase_dates(self) -> None:
         with ScriptSandbox() as sandbox:
@@ -278,7 +281,7 @@ class JncScriptTests(unittest.TestCase):
             rows = sandbox.read_downloaded_rows()
             self.assertEqual(['B1', 'Book One', '2020-02-01T00:00:00+00:00'], rows[0])
             self.assertEqual([], api.downloaded_urls)
-            self.assertNotIn('Downloading:', run.stdout)
+            self.assertNotIn('Downloading', run.stdout)
             self.assertFalse(sandbox.epub_path('book-one').exists())
 
     def test_new_series_can_be_followed_and_new_volumes_are_listed(self) -> None:
@@ -294,6 +297,8 @@ class JncScriptTests(unittest.TestCase):
 
             self.assertEqual(['my-series is a new series. Do you want to follow it? (y/n)'],
                              run.input_prompts)
+            self.assertIn('Fetching series info (1/1): my-series', run.stdout)
+            self.assertIn('Fetching book price (1/1): Book Two', run.stdout)
             self.assertIn('There are 1 new volumes available:', run.stdout)
             self.assertIn('(800 coins) Available:\tBook Two', run.stdout)
             self.assertEqual([['my-series', 'True']], sandbox.read_owned_rows())
@@ -371,8 +376,8 @@ class JncScriptTests(unittest.TestCase):
             self.assertIn('Purchased 700 coins', run.stdout)
             self.assertIn('You have 800 coins', run.stdout)
             self.assertIn('Ordered: Book Two', run.stdout)
-            self.assertIn('Downloading: Book Two', run.stdout)
-            self.assertNotIn('Downloading: Book One', run.stdout)
+            self.assertIn('Downloading (1/1): Book Two', run.stdout)
+            self.assertNotIn('Downloading (1/1): Book One', run.stdout)
             self.assertEqual([TWO_EPUB], api.downloaded_urls)
             self.assertEqual(b'two-epub', sandbox.epub_path('book-two').read_bytes())
             rows = sandbox.read_downloaded_rows()
@@ -409,7 +414,7 @@ class JncScriptTests(unittest.TestCase):
             )
             run_default = run_jnc_script(api, sandbox, argv=[], env_login=False)
             self.assertEqual([], api.downloaded_urls)
-            self.assertNotIn('Downloading:', run_default.stdout)
+            self.assertNotIn('Downloading', run_default.stdout)
 
             api_update = FakeJncApi(
                 library_items=[owned_item(VOL_ONE)],
@@ -418,7 +423,8 @@ class JncScriptTests(unittest.TestCase):
             )
             run_update = run_jnc_script(api_update, sandbox, argv=['--update-books'], env_login=False)
             self.assertEqual([ONE_EPUB], api_update.downloaded_urls)
-            self.assertIn('Downloading: Book One', run_update.stdout)
+            self.assertIn('Downloading (1/1): Book One', run_update.stdout)
+            self.assertIn('Downloaded 1 of 1 books.', run_update.stdout)
             self.assertEqual(b'one-epub-v2', sandbox.epub_path('book-one').read_bytes())
             rows = sandbox.read_downloaded_rows()
             self.assertTrue(rows[0][2].startswith(today_utc()))
